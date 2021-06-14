@@ -4,6 +4,7 @@ args <- commandArgs(trailingOnly = TRUE)
 stopifnot(grepl('^\\d+$', args[1]))
 stopifnot(grepl('^hits', args[2]))
 stopifnot(args[3] %in% c('pure', 'poisson'))
+stopifnot(args[4] %in% c('pg', 'bq'))
 
 buildBootstrapSql <- function (
   numReplicates,
@@ -11,8 +12,15 @@ buildBootstrapSql <- function (
   dataTableIdColumn,
   measureSql,
   kind = 'pure',
-  generateSeries = 'generate_series'
+  dialect = 'pg'
 ) {
+  dataTableFrom <- if (dialect == 'bq')
+                     paste0('`hits.', dataTable, '` ', dataTable)
+                   else
+                     dataTable
+
+  random <- if (dialect == 'bq') 'rand' else 'random'
+
   # SQL to sample from Poisson(1) using inverse transform sampling.
   buildPoissonSql <- function (variableName, indent = 4, maxN = 15) {
     prEvents <- ppois(0:maxN, lambda = 1)
@@ -33,19 +41,33 @@ buildBootstrapSql <- function (
     buildSql(1)
   }
 
+  buildBootstrapIndexesSql <- function () {
+    if (dialect == 'pg')
+      paste0('SELECT generate_series(0, ',
+               numReplicates, ')', ' AS bootstrap_index')
+    else
+      paste0('SELECT * FROM UNNEST(generate_array(0, ',
+               numReplicates, ')) AS bootstrap_index')
+  }
+
+  buildPercentileSql <- function (quantile, column) {
+    if (dialect == 'pg')
+      paste0('percentile_cont(', quantile,
+               ') WITHIN GROUP (ORDER BY ', column, ')')
+    else
+      paste0('percentile_cont(', column, ', ', quantile,') OVER ()')
+  }
+
   ctes <- c(
     paste0(
-      'WITH bootstrap_indexes AS (\n',
-      '  SELECT ', generateSeries, '(0, ', numReplicates, ')',
-      ' AS bootstrap_index',
-      '\n)'
+      'WITH bootstrap_indexes AS (\n  ', buildBootstrapIndexesSql(), '\n)'
     ),
     paste0(
       'bootstrap_data AS (\n',
       '  SELECT ', dataTable, '.*,',
       ' ROW_NUMBER() OVER (ORDER BY ', dataTableIdColumn, ') - 1',
       ' AS data_index\n',
-      '  FROM ', dataTable,
+      '  FROM ', dataTableFrom,
       '\n)'
     )
   )
@@ -55,7 +77,7 @@ buildBootstrapSql <- function (
       ctes,
       paste0(
         'bootstrap_map AS (\n',
-        '  SELECT floor(random() * (\n',
+        '  SELECT floor(', random, '() * (\n',
         '    SELECT count(data_index) FROM bootstrap_data)) AS data_index,\n',
         '    bootstrap_index\n',
         '  FROM bootstrap_data\n',
@@ -76,7 +98,7 @@ buildBootstrapSql <- function (
       ctes,
       paste0(
         'bootstrap_variates AS (\n',
-        '  SELECT data_index, bootstrap_index, random() AS bootstrap_u\n',
+        '  SELECT data_index, bootstrap_index, ', random, '() AS bootstrap_u\n',
         '  FROM bootstrap_data\n',
         '  JOIN bootstrap_indexes ON TRUE',
         '\n)'
@@ -106,14 +128,14 @@ buildBootstrapSql <- function (
     paste0(
       'bootstrap_ci AS (\n',
       '  SELECT\n',
-      '    percentile_cont(0.025) WITHIN GROUP (ORDER BY measure) AS measure_lo,\n',
-      '    percentile_cont(0.975) WITHIN GROUP (ORDER BY measure) AS measure_hi\n',
+      '    ', buildPercentileSql(0.025, 'measure'), ' AS measure_lo,\n',
+      '    ', buildPercentileSql(0.975, 'measure'), ' AS measure_hi\n',
       '  FROM bootstrap_measures',
       '\n)'),
     paste0(
       'sample_measures AS (\n',
       '  SELECT avg(', measureSql, ') AS measure_avg\n',
-      '  FROM ', dataTable,
+      '  FROM ', dataTableFrom,
       '\n)'
     )
   )
@@ -133,5 +155,6 @@ cat(buildBootstrapSql(
   dataTable = args[2],
   'created_at',
   'CASE WHEN converted THEN 1.0 ELSE 0.0 END',
-  kind = args[3]
+  kind = args[3],
+  dialect = args[4]
 ))
