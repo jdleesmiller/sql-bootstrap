@@ -1,18 +1,21 @@
-WITH bootstrap_indexes AS (SELECT generate_series(0, 1000) AS bootstrap_index),
-data AS (
+WITH bootstrap_indexes AS (
+  SELECT generate_series(0, 1000) AS bootstrap_index
+),
+bootstrap_data AS (
   SELECT hits.*, ROW_NUMBER() OVER (ORDER BY created_at) - 1 AS data_index
   FROM hits
 ),
 bootstrap_map AS (
-  SELECT floor(random() * (SELECT count(data_index) FROM data)) AS data_index,
+  SELECT floor(random() * (
+    SELECT count(data_index) FROM bootstrap_data)) AS data_index,
     bootstrap_index
-  FROM data
+  FROM bootstrap_data
   JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_measures AS (
-  SELECT bootstrap_index, avg(CASE WHEN converted THEN 1 ELSE 0 END) AS measure
+  SELECT bootstrap_index, avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure
   FROM bootstrap_map
-  JOIN data USING (data_index)
+  JOIN bootstrap_data USING (data_index)
   GROUP BY bootstrap_index
 ),
 bootstrap_ci AS (
@@ -22,8 +25,8 @@ bootstrap_ci AS (
   FROM bootstrap_measures
 ),
 sample_measures AS (
-  SELECT avg(CASE WHEN converted THEN 1 ELSE 0 END) AS avg_measure
-  FROM data
+  SELECT avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure_avg
+  FROM hits
 )
 SELECT *
 FROM sample_measures
