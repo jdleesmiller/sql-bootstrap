@@ -3,7 +3,7 @@ WITH bootstrap_indexes AS (
 ),
 bootstrap_data AS (
   SELECT hits.*, ROW_NUMBER() OVER (ORDER BY created_at) - 1 AS data_index
-  FROM `hits.hits` hits
+  FROM `sql_bootstrap.hits` hits
 ),
 bootstrap_variates AS (
   SELECT data_index, bootstrap_index, rand() AS bootstrap_u
@@ -43,10 +43,11 @@ bootstrap_ci AS (
     percentile_cont(measure, 0.025) OVER () AS measure_lo,
     percentile_cont(measure, 0.975) OVER () AS measure_hi
   FROM bootstrap_measures
+  LIMIT 1
 ),
 sample_measures AS (
   SELECT avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure_avg
-  FROM `hits.hits` hits
+  FROM `sql_bootstrap.hits` hits
 )
 SELECT *
 FROM sample_measures

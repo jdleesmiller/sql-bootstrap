@@ -2,7 +2,7 @@ BQ ?= bq
 PSQL ?= psql
 R ?= Rscript --vanilla
 
-BQ_DATASET ?= hits
+BQ_DATASET ?= sql_bootstrap
 
 all: examples
 
@@ -54,7 +54,12 @@ examples: example-data/examples.csv
 examples:	example-sql/bootstrap-pure.sql example-sql/bootstrap-poisson.sql
 examples:	example-sql/bq-bootstrap-pure.sql example-sql/bq-bootstrap-poisson.sql
 
+doc/cats-example.svg: doc/cats-example.R
+	$(R) $<
+doc: doc/cats-example.svg
+
 clean: sql-drop
 	rm -rf example-data .flags
+	rm -f docs/*.svg
 
-.PHONY: examples clean sql-load sql-drop bq-load bq-drop
+.PHONY: doc examples clean sql-load sql-drop bq-load bq-drop

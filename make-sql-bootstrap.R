@@ -6,6 +6,8 @@ stopifnot(grepl('^hits', args[2]))
 stopifnot(args[3] %in% c('pure', 'poisson'))
 stopifnot(args[4] %in% c('pg', 'bq'))
 
+bqDataset <- 'sql_bootstrap'
+
 buildBootstrapSql <- function (
   numReplicates,
   dataTable,
@@ -15,7 +17,7 @@ buildBootstrapSql <- function (
   dialect = 'pg'
 ) {
   dataTableFrom <- if (dialect == 'bq')
-                     paste0('`hits.', dataTable, '` ', dataTable)
+                     paste0('`', bqDataset, '.', dataTable, '` ', dataTable)
                    else
                      dataTable
 
@@ -131,6 +133,7 @@ buildBootstrapSql <- function (
       '    ', buildPercentileSql(0.025, 'measure'), ' AS measure_lo,\n',
       '    ', buildPercentileSql(0.975, 'measure'), ' AS measure_hi\n',
       '  FROM bootstrap_measures',
+      if (dialect == 'bq') '\n  LIMIT 1' else '',
       '\n)'),
     paste0(
       'sample_measures AS (\n',
