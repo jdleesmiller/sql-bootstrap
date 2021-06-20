@@ -5,8 +5,7 @@ stopifnot(grepl('^\\d+$', args[1]))
 stopifnot(grepl('^hits', args[2]))
 stopifnot(args[3] %in% c('pure', 'poisson'))
 stopifnot(args[4] %in% c('pg', 'bq'))
-
-bqDataset <- 'sql_bootstrap'
+stopifnot(args[5] %in% c('sql_bootstrap', 'none'))
 
 buildBootstrapSql <- function (
   numReplicates,
@@ -14,12 +13,16 @@ buildBootstrapSql <- function (
   dataTableIdColumn,
   measureSql,
   kind = 'pure',
-  dialect = 'pg'
+  dialect = 'pg',
+  schema = 'none'
 ) {
-  dataTableFrom <- if (dialect == 'bq')
-                     paste0('`', bqDataset, '.', dataTable, '` ', dataTable)
-                   else
+  dataTableFrom <- if (schema == 'none')
                      dataTable
+                   else
+                     if (dialect == 'bq')
+                       paste0('`', schema, '.', dataTable, '` ', dataTable)
+                     else
+                       paste0(schema, '.', dataTable, ' ', dataTable)
 
   random <- if (dialect == 'bq') 'rand' else 'random'
 
@@ -159,5 +162,6 @@ cat(buildBootstrapSql(
   'created_at',
   'CASE WHEN converted THEN 1.0 ELSE 0.0 END',
   kind = args[3],
-  dialect = args[4]
+  dialect = args[4],
+  schema = args[5]
 ))

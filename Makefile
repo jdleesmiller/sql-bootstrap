@@ -2,6 +2,7 @@ BQ ?= bq
 PSQL ?= psql
 R ?= Rscript --vanilla
 
+PSQL_SCHEMA ?= sql_bootstrap
 BQ_DATASET ?= sql_bootstrap
 
 all: examples
@@ -16,39 +17,55 @@ example-data/examples.csv: make-example-data.R
 
 HITS_CSVS = $(wildcard example-data/hits-*.csv)
 
-.flags/sql-load: example-data/examples.csv make-sql-load-scripts.R
-	Rscript --vanilla make-sql-load-scripts.R | $(PSQL)
+.flags/sql-schema:
+	$(PSQL) --command 'CREATE SCHEMA IF NOT EXISTS $(PSQL_SCHEMA)'
 	touch $@
-sql-load: .flags/sql-load
+.flags/sql-hits-%.csv: example-data/hits-%.csv
+	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).hits_$*'
+	$(PSQL) --command 'CREATE TABLE $(PSQL_SCHEMA).hits_$* \
+	  (created_at TIMESTAMP NOT NULL, converted BOOLEAN NOT NULL)'
+	$(PSQL) --command '\COPY $(PSQL_SCHEMA).hits_$* FROM $< WITH CSV HEADER'
+	touch $@
+sql-load: .flags/sql-schema
+sql-load: $(patsubst example-data/hits-%.csv,.flags/sql-hits-%.csv,$(HITS_CSVS))
 
-sql-drop: example-data/examples.csv
-	$(R) make-sql-drop-scripts.R | $(PSQL)
+sql-drop:
+	$(PSQL) --command 'DROP SCHEMA IF EXISTS $(PSQL_SCHEMA) CASCADE'
+	rm -f .flags/sql-*
 
-.flags/bq-hits:
+sql-test:
+	$(R) make-sql-bootstrap.R 1000 hits_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
+
+.flags/bq-dataset:
 	$(BQ) mk --force --dataset $(BQ_DATASET)
+	touch $@
 .flags/bq-hits-%.csv: example-data/hits-%.csv
 	$(BQ) rm --force --table $(BQ_DATASET).hits_$*
 	$(BQ) load --skip_leading_rows=1 \
 	  $(BQ_DATASET).hits_$* $< created_at:timestamp,converted:boolean
 	touch $@
-bq-load: .flags/bq-hits
+bq-load: .flags/bq-dataset
 bq-load: $(patsubst example-data/hits-%.csv,.flags/bq-hits-%.csv,$(HITS_CSVS))
 
 bq-drop:
 	$(BQ) rm --force --recursive $(BQ_DATASET)
-	rm -f .flags/bq-hits*
+	rm -f .flags/bq-*
+
+bq-test:
+	$(R) make-sql-bootstrap.R 1000 hits_1 poisson bq $(BQ_DATASET) | \
+		$(BQ) query --use_legacy_sql=false
 
 example-sql/bootstrap-pure.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits pure pg > $@
+	$(R) $< 1000 hits pure pg none > $@
 
 example-sql/bootstrap-poisson.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits poisson pg > $@
+	$(R) $< 1000 hits poisson pg none > $@
 
 example-sql/bq-bootstrap-pure.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits pure bq > $@
+	$(R) $< 1000 hits pure bq $(BQ_DATASET) > $@
 
 example-sql/bq-bootstrap-poisson.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits poisson bq > $@
+	$(R) $< 1000 hits poisson bq $(BQ_DATASET) > $@
 
 examples: example-data/examples.csv
 examples:	example-sql/bootstrap-pure.sql example-sql/bootstrap-poisson.sql
@@ -62,4 +79,8 @@ clean: sql-drop
 	rm -rf example-data .flags
 	rm -f docs/*.svg
 
-.PHONY: doc examples clean sql-load sql-drop bq-load bq-drop
+test: sql-test bq-test
+
+.PHONY: doc examples clean test
+.PHONY: sql-load sql-drop sql-test
+.PHONY: bq-load bq-drop bq-test
