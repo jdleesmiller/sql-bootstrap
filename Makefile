@@ -23,23 +23,23 @@ example-data/examples.csv: make-example-data.R
 
 HITS_CSVS = $(wildcard example-data/hits-*.csv)
 
-.flags/sql-schema:
+.flags/pg-schema:
 	$(PSQL) --command 'CREATE SCHEMA IF NOT EXISTS $(PSQL_SCHEMA)'
 	touch $@
-.flags/sql-hits-%.csv: example-data/hits-%.csv
+.flags/pg-hits-%.csv: example-data/hits-%.csv
 	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).hits_$*'
 	$(PSQL) --command 'CREATE TABLE $(PSQL_SCHEMA).hits_$* \
 	  (created_at TIMESTAMP NOT NULL, converted BOOLEAN NOT NULL)'
 	$(PSQL) --command '\COPY $(PSQL_SCHEMA).hits_$* FROM $< WITH CSV HEADER'
 	touch $@
-sql-load: .flags/sql-schema
-sql-load: $(patsubst example-data/hits-%.csv,.flags/sql-hits-%.csv,$(HITS_CSVS))
+pg-load: .flags/pg-schema
+pg-load: $(patsubst example-data/hits-%.csv,.flags/pg-hits-%.csv,$(HITS_CSVS))
 
-sql-drop:
+pg-drop:
 	$(PSQL) --command 'DROP SCHEMA IF EXISTS $(PSQL_SCHEMA) CASCADE'
-	rm -f .flags/sql-*
+	rm -f .flags/pg-*
 
-sql-test:
+pg-test: pg-load
 	$(R) make-sql-bootstrap.R 1000 hits_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
 
 .flags/bq-dataset:
@@ -61,7 +61,7 @@ bq-test:
 	$(R) make-sql-bootstrap.R 1000 hits_1 poisson bq $(BQ_DATASET) | \
 		$(BQ) query --use_legacy_sql=false
 
-benchmark-pg.csv: benchmark.R sql-load
+benchmark-pg.csv: benchmark.R pg-load
 	$(R) $< $@ pg $(BENCHMARK_TRIALS) $(PSQL)
 
 benchmark: benchmark-pg.csv
@@ -102,11 +102,11 @@ bin/cloud_sql_proxy:
 cloud-sql-proxy: bin/cloud_sql_proxy
 	$< -instances=$(CLOUD_SQL_PROJECT):$(CLOUD_SQL_REGION):$(CLOUD_SQL_INSTANCE)=tcp:5432
 
-clean: sql-drop
+clean: pg-drop bq-drop
 	rm -rf example-data .flags
 	rm -f docs/*.svg
 
-test: sql-test bq-test
+test: pg-test bq-test
 
 .PHONY: doc examples clean test
 .PHONY: sql-load sql-drop sql-test
