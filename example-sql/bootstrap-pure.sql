@@ -1,5 +1,5 @@
 WITH bootstrap_indexes AS (
-  SELECT generate_series(0, 1000) AS bootstrap_index
+  SELECT generate_series(1, 1000) AS bootstrap_index
 ),
 bootstrap_data AS (
   SELECT hits.*, ROW_NUMBER() OVER (ORDER BY created_at) - 1 AS data_index

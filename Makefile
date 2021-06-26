@@ -78,7 +78,6 @@ example-sql/bq-bootstrap-pure.sql: make-sql-bootstrap.R
 example-sql/bq-bootstrap-poisson.sql: make-sql-bootstrap.R
 	$(R) $< 1000 hits poisson bq $(BQ_DATASET) > $@
 
-examples: example-data/examples.csv
 examples:	example-sql/bootstrap-pure.sql example-sql/bootstrap-poisson.sql
 examples:	example-sql/bq-bootstrap-pure.sql example-sql/bq-bootstrap-poisson.sql
 

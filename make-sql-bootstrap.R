@@ -21,22 +21,17 @@ buildBootstrapSql <- function (
 
   # SQL to sample from Poisson(1) using inverse transform sampling.
   buildPoissonSql <- function (variableName, indent = 4, maxN = 15) {
-    prEvents <- ppois(0:maxN, lambda = 1)
-    indent <- strrep(' ', 4)
+    nEvents <- 0:(maxN - 1)
+    prEvents <- ppois(nEvents, lambda = 1)
+    indent <- paste0('\n', strrep(' ', 4))
 
-    buildSql <- function (n) {
-      if (n > maxN) {
-        paste0('\n', indent, maxN)
-      } else {
-        paste0(
-          '\n', indent,
-          'CASE WHEN ', variableName, ' < ', prEvents[n],
-          ' THEN ', n - 1,
-          ' ELSE ', buildSql(n + 1), ' END')
-      }
-    }
-
-    buildSql(1)
+    paste0(
+      'CASE', indent,
+      paste(
+        'WHEN bootstrap_u <', prEvents, 'THEN', nEvents,
+        collapse = indent),
+      indent,
+      'ELSE ', maxN, ' END')
   }
 
   buildBootstrapIndexesSql <- function () {
@@ -56,23 +51,21 @@ buildBootstrapSql <- function (
       paste0('percentile_cont(', column, ', ', quantile,') OVER ()')
   }
 
-  ctes <- c(
-    paste0(
-      'WITH bootstrap_indexes AS (\n  ', buildBootstrapIndexesSql(), '\n)'
-    ),
-    paste0(
-      'bootstrap_data AS (\n',
-      '  SELECT ', dataTable, '.*,',
-      ' ROW_NUMBER() OVER (ORDER BY ', dataTableIdColumn, ') - 1',
-      ' AS data_index\n',
-      '  FROM ', dataTableFrom,
-      '\n)'
-    )
+  ctes <- paste0(
+    'WITH bootstrap_indexes AS (\n  ', buildBootstrapIndexesSql(), '\n)'
   )
 
   if (kind == 'pure') {
     ctes <- c(
       ctes,
+      paste0(
+        'bootstrap_data AS (\n',
+        '  SELECT ', dataTable, '.*,',
+        ' ROW_NUMBER() OVER (ORDER BY ', dataTableIdColumn, ') - 1',
+        ' AS data_index\n',
+        '  FROM ', dataTableFrom,
+        '\n)'
+      ),
       paste0(
         'bootstrap_map AS (\n',
         '  SELECT floor(', random, '() * (\n',
@@ -96,14 +89,15 @@ buildBootstrapSql <- function (
       ctes,
       paste0(
         'bootstrap_variates AS (\n',
-        '  SELECT data_index, bootstrap_index, ', random, '() AS bootstrap_u\n',
-        '  FROM bootstrap_data\n',
+        '  SELECT ', dataTable, '.*, bootstrap_index, ',
+          random, '() AS bootstrap_u\n',
+        '  FROM ', dataTableFrom,
         '  JOIN bootstrap_indexes ON TRUE',
         '\n)'
       ),
       paste0(
         'bootstrap_weights AS (\n',
-        '  SELECT data_index, bootstrap_index, (',
+        '  SELECT bootstrap_variates.*, (',
         buildPoissonSql('bootstrap_u'), ') AS bootstrap_weight\n',
         '  FROM bootstrap_variates',
         '\n)'
@@ -114,7 +108,6 @@ buildBootstrapSql <- function (
         '  sum(bootstrap_weight * (', measureSql, ')) /\n',
         '    sum(bootstrap_weight) AS measure\n',
         '  FROM bootstrap_weights\n',
-        '  JOIN bootstrap_data USING (data_index)\n',
         '  GROUP BY bootstrap_index',
         '\n)'
       )
