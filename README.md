@@ -18,6 +18,14 @@ postgres -D /usr/local/var/postgres
 psql
 ```
 
+### Cloud SQL Postgres
+
+```
+make cloud-sql-instance
+make cloud-sql-proxy
+PSQL="psql postgres://postgres:$CLOUD_SQL_PGPASSWORD@localhost:5432" make benchmark-pg.csv
+```
+
 ### BigQuery
 
 ```

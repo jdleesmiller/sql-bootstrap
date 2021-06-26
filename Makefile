@@ -2,8 +2,14 @@ BQ ?= bq
 PSQL ?= psql
 R ?= Rscript --vanilla
 
+CLOUD_SQL_PROJECT ?= sql-bootstrap
+CLOUD_SQL_REGION ?= europe-west2
+CLOUD_SQL_INSTANCE ?= sql-bootstrap-1
+
 PSQL_SCHEMA ?= sql_bootstrap
 BQ_DATASET ?= sql_bootstrap
+
+BENCHMARK_TRIALS ?= 10
 
 all: examples
 
@@ -55,6 +61,11 @@ bq-test:
 	$(R) make-sql-bootstrap.R 1000 hits_1 poisson bq $(BQ_DATASET) | \
 		$(BQ) query --use_legacy_sql=false
 
+benchmark-pg.csv: benchmark.R sql-load
+	$(R) $< $@ pg $(BENCHMARK_TRIALS) $(PSQL)
+
+benchmark: benchmark-pg.csv
+
 example-sql/bootstrap-pure.sql: make-sql-bootstrap.R
 	$(R) $< 1000 hits pure pg none > $@
 
@@ -75,6 +86,23 @@ doc/cats-example.svg: doc/cats-example.R
 	$(R) $<
 doc: doc/cats-example.svg
 
+cloud-sql-instance:
+	@test -n "$(CLOUD_SQL_PGPASSWORD)"
+	gcloud sql instances create $(CLOUD_SQL_INSTANCE) --cpu=8 --memory=16384MB \
+		--database-version=POSTGRES_13 --region=$(CLOUD_SQL_REGION)
+	@gcloud sql users set-password postgres --instance=$(CLOUD_SQL_INSTANCE) \
+		--password="$(CLOUD_SQL_PGPASSWORD)"
+	gcloud sql instances patch $(CLOUD_SQL_INSTANCE) \
+	  --database-flags temp_file_limit=33554432
+
+bin/cloud_sql_proxy:
+	mkdir -p bin
+	curl -o $@ https://dl.google.com/cloudsql/cloud_sql_proxy.darwin.amd64
+	chmod +x $@
+
+cloud-sql-proxy: bin/cloud_sql_proxy
+	$< -instances=$(CLOUD_SQL_PROJECT):$(CLOUD_SQL_REGION):$(CLOUD_SQL_INSTANCE)=tcp:5432
+
 clean: sql-drop
 	rm -rf example-data .flags
 	rm -f docs/*.svg
@@ -84,3 +112,4 @@ test: sql-test bq-test
 .PHONY: doc examples clean test
 .PHONY: sql-load sql-drop sql-test
 .PHONY: bq-load bq-drop bq-test
+.PHONY: cloud-sql-instance cloud-sql-proxy

@@ -1,17 +1,10 @@
 #!/usr/bin/env Rscript
 
-args <- commandArgs(trailingOnly = TRUE)
-stopifnot(grepl('^\\d+$', args[1]))
-stopifnot(grepl('^hits', args[2]))
-stopifnot(args[3] %in% c('pure', 'poisson'))
-stopifnot(args[4] %in% c('pg', 'bq'))
-stopifnot(args[5] %in% c('sql_bootstrap', 'none'))
-
 buildBootstrapSql <- function (
   numReplicates,
   dataTable,
-  dataTableIdColumn,
-  measureSql,
+  dataTableIdColumn = 'created_at',
+  measureSql = 'CASE WHEN converted THEN 1.0 ELSE 0.0 END',
   kind = 'pure',
   dialect = 'pg',
   schema = 'none'
@@ -48,10 +41,10 @@ buildBootstrapSql <- function (
 
   buildBootstrapIndexesSql <- function () {
     if (dialect == 'pg')
-      paste0('SELECT generate_series(0, ',
+      paste0('SELECT generate_series(1, ',
                numReplicates, ')', ' AS bootstrap_index')
     else
-      paste0('SELECT * FROM UNNEST(generate_array(0, ',
+      paste0('SELECT * FROM UNNEST(generate_array(1, ',
                numReplicates, ')) AS bootstrap_index')
   }
 
@@ -156,12 +149,19 @@ buildBootstrapSql <- function (
   )
 }
 
-cat(buildBootstrapSql(
-  numReplicates = as.numeric(args[1]),
-  dataTable = args[2],
-  'created_at',
-  'CASE WHEN converted THEN 1.0 ELSE 0.0 END',
-  kind = args[3],
-  dialect = args[4],
-  schema = args[5]
-))
+if (sys.nframe() == 0L) {
+  args <- commandArgs(trailingOnly = TRUE)
+  stopifnot(grepl('^\\d+$', args[1]))
+  stopifnot(grepl('^hits', args[2]))
+  stopifnot(args[3] %in% c('pure', 'poisson'))
+  stopifnot(args[4] %in% c('pg', 'bq'))
+  stopifnot(args[5] %in% c('sql_bootstrap', 'none'))
+
+  cat(buildBootstrapSql(
+    numReplicates = as.numeric(args[1]),
+    dataTable = args[2],
+    kind = args[3],
+    dialect = args[4],
+    schema = args[5]
+  ))
+}
