@@ -15,7 +15,7 @@ generateExampleData <- function (conversionRate, numHits) {
 
 examples <- merge(
   data.frame(conversionRate = c(0.01, 0.02)),
-  data.frame(numHitsOrder = c(3, 4, 5)), by = NULL)
+  data.frame(numHitsOrder = c(3, 4, 5, 6, 7)), by = NULL)
 examples <- cbind(id = 1:nrow(examples), examples)
 examples$file <- file.path(dataDir, paste0('hits-', examples$id, '.csv'))
 examples$tableName <- paste('hits', examples$id, sep = '_')

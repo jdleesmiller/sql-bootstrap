@@ -2,4 +2,5 @@
 .flags
 bin/cloud_sql_proxy
 benchmark-*.csv
+check.csv
 example-data

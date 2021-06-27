@@ -11,6 +11,7 @@ furtherCommandArgs <-
   if (length(args) > 4) args[5:length(args)] else character()
 schema <- 'sql_bootstrap'
 
+stopifnot(nchar(resultsFile) > 0)
 stopifnot(dialect %in% c('pg', 'bq'))
 stopifnot(numTrials > 0)
 stopifnot(nchar(command) > 0)
@@ -20,13 +21,11 @@ if (!file.exists(resultsFile)) {
     'exampleId,replicates,kind,trial,measureAvg,measureLo,measureHi,elapsed\n',
     file = resultsFile)
 }
-results <- fread(
-  resultsFile
-)
+results <- fread(resultsFile)
 
 examples <- fread('example-data/examples.csv')
 
-# if (dialect == 'pg') examples <- examples[numHitsOrder < 5]
+if (dialect == 'pg') examples <- examples[numHitsOrder < 6]
 
 grid <- merge(
   CJ(
@@ -37,6 +36,14 @@ grid <- merge(
   ),
   examples, by.x = 'exampleId', by.y = 'id'
 )
+
+if (dialect == 'bq') {
+  # We hit the 2500 cpu-second limit for 'pure' with 2000 replicates, and for
+  # 'poisson' as well with 1000 replicates with 10^7 hits.
+  grid <- grid[
+    (kind == 'poisson' | replicates < 2000) &
+    (numHitsOrder < 7 | replicates < 1000)]
+}
 
 runQuery <- function(query) {
   start <- proc.time()

@@ -20,6 +20,7 @@ all: examples
 example-data/examples.csv: make-example-data.R
 	mkdir -p example-data
 	Rscript --vanilla make-example-data.R
+example-data: example-data/examples.csv
 
 HITS_CSVS = $(wildcard example-data/hits-*.csv)
 
@@ -64,7 +65,13 @@ bq-test:
 benchmark-pg.csv: benchmark.R pg-load
 	$(R) $< $@ pg $(BENCHMARK_TRIALS) $(PSQL)
 
-benchmark: benchmark-pg.csv
+benchmark-bq.csv: benchmark.R bq-load
+	$(R) $< $@ bq $(BENCHMARK_TRIALS) $(BQ) query --use_legacy_sql=false
+
+benchmark: benchmark-pg.csv benchmark-bq.csv
+
+check.csv: check.R example-data
+	$(R) $< $@
 
 example-sql/bootstrap-pure.sql: make-sql-bootstrap.R
 	$(R) $< 1000 hits pure pg none > $@
@@ -108,7 +115,7 @@ clean: pg-drop bq-drop
 
 test: pg-test bq-test
 
-.PHONY: doc examples clean test
+.PHONY: doc examples example-data clean test
 .PHONY: sql-load sql-drop sql-test
 .PHONY: bq-load bq-drop bq-test
 .PHONY: cloud-sql-instance cloud-sql-proxy

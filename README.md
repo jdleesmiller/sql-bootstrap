@@ -5,7 +5,7 @@
 First generate the example data, then run the calculations.
 
 ```sh
-make examples
+make example-data
 make
 ```
 
