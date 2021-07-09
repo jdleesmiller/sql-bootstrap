@@ -16,7 +16,14 @@ stopifnot(dialect %in% c('pg', 'bq'))
 stopifnot(numTrials > 0)
 stopifnot(nchar(command) > 0)
 
-if (!file.exists(resultsFile)) {
+if (file.exists(resultsFile)) {
+  stopifnot(file.copy(
+    resultsFile,
+    paste(
+      resultsFile, 'bak',
+      strftime(Sys.time(), '%Y-%m-%dT%H-%M-%S'), sep = '.'),
+    copy.date = TRUE))
+} else {
   cat(
     'exampleId,replicates,kind,trial,measureAvg,measureLo,measureHi,elapsed\n',
     file = resultsFile)
@@ -24,8 +31,6 @@ if (!file.exists(resultsFile)) {
 results <- fread(resultsFile)
 
 examples <- fread('example-data/examples.csv')
-
-if (dialect == 'pg') examples <- examples[numHitsOrder < 6]
 
 grid <- merge(
   CJ(
@@ -39,10 +44,23 @@ grid <- merge(
 
 if (dialect == 'bq') {
   # We hit the 2500 cpu-second limit for 'pure' with 2000 replicates, and for
-  # 'poisson' as well with 1000 replicates with 10^7 hits.
+  # 'poisson' as well with 1000 replicates with 10^7 hits. (Unless using
+  # reserved slots.)
   grid <- grid[
     (kind == 'poisson' | replicates < 2000) &
     (numHitsOrder < 7 | replicates < 1000)]
+} else {
+  # Larger examples take a while; thin out the grid.
+  grid <- grid[
+    (numHitsOrder < 6) |
+    (numHitsOrder == 6 & conversionRate == 0.01 &
+      replicates %in% c(500, 1000) & trial <= 3)
+  ]
+}
+
+# For checking the CIs, we need more than 10 trials.
+if (numTrials == 100) {
+  grid <- grid[numHitsOrder == 4]
 }
 
 runQuery <- function(query) {

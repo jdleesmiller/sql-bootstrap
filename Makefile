@@ -2,9 +2,9 @@ BQ ?= bq
 PSQL ?= psql
 R ?= Rscript --vanilla
 
+GCP_REGION ?= europe-west2
 CLOUD_SQL_PROJECT ?= sql-bootstrap
-CLOUD_SQL_REGION ?= europe-west2
-CLOUD_SQL_INSTANCE ?= sql-bootstrap-1
+CLOUD_SQL_INSTANCE ?= sql-bootstrap-2
 
 PSQL_SCHEMA ?= sql_bootstrap
 BQ_DATASET ?= sql_bootstrap
@@ -44,7 +44,7 @@ pg-test: pg-load
 	$(R) make-sql-bootstrap.R 1000 hits_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
 
 .flags/bq-dataset:
-	$(BQ) mk --force --dataset $(BQ_DATASET)
+	$(BQ) mk --force --data_location=$(GCP_REGION) --dataset $(BQ_DATASET)
 	touch $@
 .flags/bq-hits-%.csv: example-data/hits-%.csv
 	$(BQ) rm --force --table $(BQ_DATASET).hits_$*
@@ -60,15 +60,19 @@ bq-drop:
 
 bq-test:
 	$(R) make-sql-bootstrap.R 1000 hits_1 poisson bq $(BQ_DATASET) | \
-		$(BQ) query --use_legacy_sql=false
+		$(BQ) --location=$(GCP_REGION) query --use_legacy_sql=false
 
 benchmark-pg.csv: benchmark.R pg-load
 	$(R) $< $@ pg $(BENCHMARK_TRIALS) $(PSQL)
 
 benchmark-bq.csv: benchmark.R bq-load
-	$(R) $< $@ bq $(BENCHMARK_TRIALS) $(BQ) query --use_legacy_sql=false
+	$(R) $< $@ bq $(BENCHMARK_TRIALS) \
+	  $(BQ) --location=$(GCP_REGION) query --use_legacy_sql=false
 
 benchmark: benchmark-pg.csv benchmark-bq.csv
+
+# Please don't delete all my results on Ctrl-C...
+.PRECIOUS: benchmark-pg.csv benchmark-bq.csv
 
 check.csv: check.R example-data
 	$(R) $< $@
@@ -95,11 +99,11 @@ doc: doc/cats-example.svg
 cloud-sql-instance:
 	@test -n "$(CLOUD_SQL_PGPASSWORD)"
 	gcloud sql instances create $(CLOUD_SQL_INSTANCE) --cpu=8 --memory=16384MB \
-		--database-version=POSTGRES_13 --region=$(CLOUD_SQL_REGION)
+		--database-version=POSTGRES_13 --region=$(GCP_REGION)
 	@gcloud sql users set-password postgres --instance=$(CLOUD_SQL_INSTANCE) \
 		--password="$(CLOUD_SQL_PGPASSWORD)"
 	gcloud sql instances patch $(CLOUD_SQL_INSTANCE) \
-	  --database-flags temp_file_limit=33554432
+	  --database-flags temp_file_limit=335544320
 
 bin/cloud_sql_proxy:
 	mkdir -p bin
@@ -107,7 +111,7 @@ bin/cloud_sql_proxy:
 	chmod +x $@
 
 cloud-sql-proxy: bin/cloud_sql_proxy
-	$< -instances=$(CLOUD_SQL_PROJECT):$(CLOUD_SQL_REGION):$(CLOUD_SQL_INSTANCE)=tcp:5432
+	$< -instances=$(CLOUD_SQL_PROJECT):$(GCP_REGION):$(CLOUD_SQL_INSTANCE)=tcp:5432
 
 clean: pg-drop bq-drop
 	rm -rf example-data .flags
