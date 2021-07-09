@@ -91,7 +91,7 @@ buildBootstrapSql <- function (
         'bootstrap_variates AS (\n',
         '  SELECT ', dataTable, '.*, bootstrap_index, ',
           random, '() AS bootstrap_u\n',
-        '  FROM ', dataTableFrom,
+        '  FROM ', dataTableFrom, '\n',
         '  JOIN bootstrap_indexes ON TRUE',
         '\n)'
       ),

@@ -3,7 +3,8 @@ WITH bootstrap_indexes AS (
 ),
 bootstrap_variates AS (
   SELECT hits.*, bootstrap_index, rand() AS bootstrap_u
-  FROM `sql_bootstrap.hits` hits  JOIN bootstrap_indexes ON TRUE
+  FROM `sql_bootstrap.hits` hits
+  JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_weights AS (
   SELECT bootstrap_variates.*, (CASE
