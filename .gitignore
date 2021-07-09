@@ -5,3 +5,5 @@ benchmark-*.csv
 benchmark-*.csv.bak.*
 check.csv
 example-data
+.Rproj.user
+*.nb.html

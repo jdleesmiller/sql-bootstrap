@@ -1,0 +1,163 @@
+---
+title: "SQL Bootstrap"
+output: html_notebook
+---
+
+```{r}
+library(boot)
+library(data.table)
+library(ggplot2)
+```
+
+```{r}
+examples <- fread('example-data/examples.csv', stringsAsFactors = TRUE)
+summary(examples)
+```
+
+## Running Times
+
+```{r}
+benchmark <- rbind(
+  cbind(tool = 'bq', fread('benchmark-bq.csv', stringsAsFactors = TRUE)),
+  cbind(tool = 'pg', fread('benchmark-pg.csv', stringsAsFactors = TRUE))
+)
+benchmark[, tool := factor(tool)]
+
+# Filter out records that are used for checking (below) rather than benchmarking.
+benchmark <- benchmark[trial <= 10 & replicates %in% c(1000)]
+
+summary(benchmark)
+```
+
+```{r}
+bootstrapTConfidenceIntervals <- function (df, metaReplicates = 1000) {
+  b <- boot(df, function (data, indexes) {
+    t(data[indexes, .(mean(elapsed), (.N-1)*var(elapsed)/.N^2)])
+  }, metaReplicates)
+  ci <- if (max(b$t[,1]) - min(b$t[,1]) < 1e-3) {
+    # not enough variance for boot.ci
+    c(min(b$t[,1]), max(b$t[,1]))
+  } else {
+    boot.ci(b, type = 'stud')$student[4:5]
+  }
+  data.table(
+    variable = factor('elapsed'),
+    point = factor(c('lo', 'hi', 'avg')),
+    value = c(ci, b$t0[1])
+  )
+}
+benchmarkCi <- benchmark[
+  trial > 1 # first trial is sometimes a 'burn in' on a cold database
+  , bootstrapTConfidenceIntervals(.SD),
+  .(exampleId, tool, replicates, kind)]
+summary(benchmarkCi)
+```
+
+```{r}
+benchmarkCiWithExamples <- merge(benchmarkCi, examples, by.x = 'exampleId', by.y = 'id')
+summary(benchmarkCiWithExamples)
+```
+
+```{r}
+p <- ggplot(
+  dcast(
+    benchmarkCiWithExamples[variable == 'elapsed' & conversionRate == 0.01],
+    tool + kind + numHitsOrder ~ point),
+  aes(
+    x = numHitsOrder, y = avg,
+    color = ifelse(kind == 'pure', 'Pure', 'Poisson'))) +
+  geom_line(aes(linetype = ifelse(tool == 'bq', 'BigQuery', 'PostgreSQL'))) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.2) +
+  scale_x_continuous(
+    'Number of Hits',
+    labels = function (b) parse(text = paste0('10^', b))) +
+  scale_y_continuous('Time (s; lower is better)') +
+  scale_linetype_discrete(name = 'Tool') +
+  scale_color_discrete(name = 'Query Kind') +
+  labs(
+    title = 'SQL Bootstrap Benchmarks',
+    subtitle = 'Elapsed times for 1000 bootstrap resamples')
+ggsave(file = 'benchmark.svg', plot = p, width = 7, height = 4)
+p
+```
+
+## Stability of Confidence Intervals
+
+```{r}
+check <- fread('check.csv', stringsAsFactors = TRUE)
+summary(check)
+```
+
+```{r}
+checkPg <- fread('benchmark-pg.csv', stringsAsFactors = TRUE)[exampleId %in% c(3, 4)]
+summary(checkPg)
+```
+
+```{r}
+checkPgMelted <- melt(
+    checkPg[, .(exampleId, replicates, kind, trial, lo = measureLo, hi = measureHi)],
+    measure.vars = c('lo', 'hi'), variable.name = 'endpoint')
+summary(checkPgMelted)
+```
+
+```{r}
+checkReferenceValues <- local({
+  q <- c(0.025, 0.975)
+  checkExamples <- examples[id %in% checkPg$exampleId]
+  rbind(
+    rbindlist(by(checkExamples, checkExamples[,id], function(example) {
+      xs <- fread(as.character(example[, file]))[, converted]
+      n <- length(xs)
+      sampleMean <- mean(xs)
+      ciT <- sampleMean + qt(q, n - 1) * sd(xs) / sqrt(n)
+      data.table(
+        exampleId = example[, id],
+        ref = factor(c('true', 'sample', 't', 't')),
+        endpoint = factor(c('mean', 'mean', 'lo', 'hi')),
+        value = c(example[, conversionRate], sampleMean, ciT)
+      )
+    })),
+    melt(
+      check[
+        exampleId %in% checkExamples[, id] & replicates == 2000,
+        .(exampleId, ref = 'r', lo = measureLo, hi = measureHi)],
+      id.vars = c('exampleId', 'ref'), variable.name = 'endpoint'))
+})
+checkReferenceValues[
+  , ref := factor(ref, levels = c('true', 'sample', 'r', 't'))]
+summary(checkReferenceValues)
+```
+
+```{r}
+withExamples <- function (d) {
+  merge(d, examples, by.x = 'exampleId', by.y = 'id')
+}
+referenceValuesLabels <- c(
+  'true' = 'True Mean',
+  'sample' = 'Sample Mean',
+  't' = 'Classical t 95% CI',
+  'r' = 'Bootstrap 95% CI from R')
+p <- ggplot(
+  withExamples(checkPgMelted)[conversionRate == 0.01],
+  aes(x = value, y = factor(replicates))) +
+  geom_violin(
+    aes(group = paste(replicates, endpoint)),
+    position = 'identity') +
+  geom_vline(
+    aes(xintercept = value, linetype = ref, color = ref),
+    data = withExamples(checkReferenceValues)[conversionRate == 0.01]) +
+  scale_linetype_discrete('Reference Values', labels = referenceValuesLabels) +
+  scale_color_discrete('Reference Values', labels = referenceValuesLabels) +
+  scale_x_continuous(
+    'Conversion Rate', labels = scales::label_percent(accuracy = 0.1)) +
+  facet_grid(factor(
+    ifelse(kind == 'pure', 'Pure', 'Poisson'),
+    levels = c('Pure', 'Poisson')) ~ .) +
+  ylab('Number of Bootstrap Resamples') +
+  labs(
+    title = 'Checks on SQL Bootstrap Confidence Intervals',
+    subtitle = expression(paste('For', ''~10^4~'', 'hits with 1% true conversion rate'))
+  )
+ggsave(file = 'check.svg', plot = p, width = 7, height = 4)
+p
+```
