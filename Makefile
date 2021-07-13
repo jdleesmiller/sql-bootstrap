@@ -30,7 +30,7 @@ HITS_CSVS = $(wildcard example-data/hits-*.csv)
 .flags/pg-hits-%.csv: example-data/hits-%.csv
 	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).hits_$*'
 	$(PSQL) --command 'CREATE TABLE $(PSQL_SCHEMA).hits_$* \
-	  (created_at TIMESTAMP NOT NULL, converted BOOLEAN NOT NULL)'
+	  (created_at TIMESTAMP NOT NULL, converted DOUBLE PRECISION NOT NULL)'
 	$(PSQL) --command '\COPY $(PSQL_SCHEMA).hits_$* FROM $< WITH CSV HEADER'
 	touch $@
 pg-load: .flags/pg-schema
@@ -49,7 +49,7 @@ pg-test: pg-load
 .flags/bq-hits-%.csv: example-data/hits-%.csv
 	$(BQ) rm --force --table $(BQ_DATASET).hits_$*
 	$(BQ) load --skip_leading_rows=1 \
-	  $(BQ_DATASET).hits_$* $< created_at:timestamp,converted:boolean
+	  $(BQ_DATASET).hits_$* $< created_at:timestamp,converted:float64
 	touch $@
 bq-load: .flags/bq-dataset
 bq-load: $(patsubst example-data/hits-%.csv,.flags/bq-hits-%.csv,$(HITS_CSVS))

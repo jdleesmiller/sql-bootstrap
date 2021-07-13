@@ -4,12 +4,12 @@ dataDir <- 'example-data'
 hitCreationRate <- 0.1 # per second
 startTime <- as.POSIXct('2021-01-01', tz = 'UTC')
 
-set.seed(7750325)
+set.seed(8248246)
 options(digits.secs = 3)
 
 generateExampleData <- function (conversionRate, numHits) {
   createdAt <- startTime + cumsum(rexp(numHits, hitCreationRate))
-  converted <- runif(numHits) < conversionRate
+  converted <- ifelse(runif(numHits) < conversionRate, 1, 0)
   data.frame(created_at = createdAt, converted = converted)
 }
 

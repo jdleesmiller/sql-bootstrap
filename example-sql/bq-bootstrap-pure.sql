@@ -2,7 +2,7 @@ WITH bootstrap_indexes AS (
   SELECT * FROM UNNEST(generate_array(1, 1000)) AS bootstrap_index
 ),
 bootstrap_data AS (
-  SELECT hits.*, ROW_NUMBER() OVER (ORDER BY created_at) - 1 AS data_index
+  SELECT converted, ROW_NUMBER() OVER (ORDER BY created_at) - 1 AS data_index
   FROM `sql_bootstrap.hits` hits
 ),
 bootstrap_map AS (
@@ -12,23 +12,32 @@ bootstrap_map AS (
   FROM bootstrap_data
   JOIN bootstrap_indexes ON TRUE
 ),
-bootstrap_measures AS (
-  SELECT bootstrap_index, avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure
+bootstrap AS (
+  SELECT bootstrap_index,
+    avg(converted) AS rate_avg,
+    stddev(converted) AS rate_sd
   FROM bootstrap_map
   JOIN bootstrap_data USING (data_index)
   GROUP BY bootstrap_index
 ),
-bootstrap_ci AS (
-  SELECT
-    percentile_cont(measure, 0.025) OVER () AS measure_lo,
-    percentile_cont(measure, 0.975) OVER () AS measure_hi
-  FROM bootstrap_measures
-  LIMIT 1
-),
-sample_measures AS (
-  SELECT avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure_avg
+sample AS (
+  SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd
   FROM `sql_bootstrap.hits` hits
+),
+bootstrap_q AS (
+  SELECT
+    percentile_cont(
+      (bootstrap.rate_avg - sample.rate_avg) /
+        bootstrap.rate_sd, 0.025) OVER () AS q_lo,
+    percentile_cont(
+      (bootstrap.rate_avg - sample.rate_avg) /
+        bootstrap.rate_sd, 0.975) OVER () AS q_hi,
+  FROM bootstrap
+  JOIN sample ON TRUE
+  LIMIT 1
 )
-SELECT *
-FROM sample_measures
-JOIN bootstrap_ci ON TRUE;
+SELECT sample.rate_avg,
+  sample.rate_avg - sample.rate_sd * q_hi AS rate_lo,
+  sample.rate_avg - sample.rate_sd * q_lo AS rate_hi
+FROM sample
+JOIN bootstrap_q ON TRUE;

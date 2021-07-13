@@ -1,5 +1,5 @@
 #
-# Example for use in a blog post.
+# Example for use in the blog post: estimating the mean weight of cats.
 #
 
 library(boot)
@@ -105,7 +105,7 @@ ggsave(
       ylab('Probability'))
 
 # What is the coverage like for the various intervals?
-check <- rbindlist(lapply(1:1000, function (trial) {
+check <- rbindlist(lapply(1:10000, function (trial) {
   if (trial %% 100 == 0) print(trial)
   x <- data.table(weight = round(rnorm(sampleSize, trueMean, trueSd), 1))
   b <- boot(x, getBootstrapStats, bootstrapReplicates)
@@ -124,4 +124,6 @@ check <- rbindlist(lapply(1:1000, function (trial) {
   results[, ok := ifelse(endpoint == 'lo', value < trueMean, trueMean < value)]
   results
 }))
-check[, .(miss = 1 - mean(ok)), .(method, endpoint)]
+cat(
+  kable(check[, .(miss = 1 - mean(ok)), .(method, endpoint)]),
+  sep = '\n')

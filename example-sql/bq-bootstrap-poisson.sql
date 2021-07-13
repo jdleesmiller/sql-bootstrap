@@ -1,13 +1,13 @@
 WITH bootstrap_indexes AS (
   SELECT * FROM UNNEST(generate_array(1, 1000)) AS bootstrap_index
 ),
-bootstrap_variates AS (
-  SELECT hits.*, bootstrap_index, rand() AS bootstrap_u
-  FROM `sql_bootstrap.hits` hits
+bootstrap_data AS (
+  SELECT converted, bootstrap_index, rand() AS bootstrap_u
+  FROM `sql_bootstrap.hits_3` hits
   JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_weights AS (
-  SELECT bootstrap_variates.*, (CASE
+  SELECT bootstrap_data.*, (CASE
     WHEN bootstrap_u < 0.367879441171442 THEN 0
     WHEN bootstrap_u < 0.735758882342885 THEN 1
     WHEN bootstrap_u < 0.919698602928606 THEN 2
@@ -24,26 +24,41 @@ bootstrap_weights AS (
     WHEN bootstrap_u < 0.99999999999548 THEN 13
     WHEN bootstrap_u < 0.9999999999997 THEN 14
     ELSE 15 END) AS bootstrap_weight
-  FROM bootstrap_variates
+  FROM bootstrap_data
 ),
-bootstrap_measures AS (
+bootstrap_avg AS (
   SELECT bootstrap_index,
-  sum(bootstrap_weight * (CASE WHEN converted THEN 1.0 ELSE 0.0 END)) /
-    sum(bootstrap_weight) AS measure
+    sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg
   FROM bootstrap_weights
   GROUP BY bootstrap_index
 ),
-bootstrap_ci AS (
-  SELECT
-    percentile_cont(measure, 0.025) OVER () AS measure_lo,
-    percentile_cont(measure, 0.975) OVER () AS measure_hi
-  FROM bootstrap_measures
-  LIMIT 1
+bootstrap AS (
+  SELECT bootstrap_index,
+    max(rate_avg) AS rate_avg,
+    sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
+      sum(bootstrap_weight)) AS rate_sd
+  FROM bootstrap_weights
+  JOIN bootstrap_avg USING (bootstrap_index)
+  GROUP BY bootstrap_index
 ),
-sample_measures AS (
-  SELECT avg(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS measure_avg
-  FROM `sql_bootstrap.hits` hits
+sample AS (
+  SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd
+  FROM `sql_bootstrap.hits_3` hits
+),
+bootstrap_q AS (
+  SELECT
+    percentile_cont(
+      (bootstrap.rate_avg - sample.rate_avg) /
+        bootstrap.rate_sd, 0.025) OVER () AS q_lo,
+    percentile_cont(
+      (bootstrap.rate_avg - sample.rate_avg) /
+        bootstrap.rate_sd, 0.975) OVER () AS q_hi,
+  FROM bootstrap
+  JOIN sample ON TRUE
+  LIMIT 1
 )
-SELECT *
-FROM sample_measures
-JOIN bootstrap_ci ON TRUE;
+SELECT sample.rate_avg,
+  sample.rate_avg - sample.rate_sd * q_hi AS rate_lo,
+  sample.rate_avg - sample.rate_sd * q_lo AS rate_hi
+FROM sample
+JOIN bootstrap_q ON TRUE;
