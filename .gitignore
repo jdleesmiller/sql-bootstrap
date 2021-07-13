@@ -4,6 +4,9 @@ bin/cloud_sql_proxy
 benchmark-*.csv
 benchmark-*.csv.bak.*
 check.csv
+doc/*.RData
+doc/*.csv
 example-data
 .Rproj.user
+.Rhistory
 *.nb.html
