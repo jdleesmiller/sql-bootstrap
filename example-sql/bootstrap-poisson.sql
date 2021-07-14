@@ -1,4 +1,4 @@
-explain analyze WITH bootstrap_indexes AS (
+WITH bootstrap_indexes AS (
   SELECT generate_series(1, 1000) AS bootstrap_index
 ),
 bootstrap_data AS (
@@ -26,58 +26,19 @@ bootstrap_weights AS (
     ELSE 15 END) AS bootstrap_weight
   FROM bootstrap_data
 ),
--- this seems much worse than the obvious approach
--- bootstrap AS (
---   SELECT bootstrap_index, t1.rate_avg, t2.rate_sd
---   FROM (
---     SELECT bootstrap_index,
---       sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg
---     FROM bootstrap_weights w1
---     GROUP BY bootstrap_index
---   ) t1,
---   LATERAL (
---     SELECT sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
---       sum(bootstrap_weight)) AS rate_sd
---     FROM bootstrap_weights w2
---     WHERE w2.bootstrap_index = t1.bootstrap_index
---   ) t2
--- ),
--- bootstrap_avg AS (
---   SELECT bootstrap_index,
---     sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg
---   FROM bootstrap_weights
---   GROUP BY bootstrap_index
--- ),
--- bootstrap AS (
---   SELECT bootstrap_index,
---     max(rate_avg) AS rate_avg,
---     sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
---       sum(bootstrap_weight)) AS rate_sd
---   FROM bootstrap_weights
---   JOIN bootstrap_avg USING (bootstrap_index)
---   GROUP BY bootstrap_index
--- ),
--- this 'explain's worse but ends up performing about the same
--- bootstrap AS (
---   SELECT bootstrap_index,
---     MAX(rate_avg) AS rate_avg,
---     sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
---       sum(bootstrap_weight)) AS rate_sd
---   FROM (
---     SELECT bootstrap_weights.*,
---       (sum(bootstrap_weight * converted) OVER (PARTITION BY bootstrap_index)) /
---       (sum(bootstrap_weight) OVER (PARTITION BY bootstrap_index)) AS rate_avg
---     FROM bootstrap_weights
---   ) t
---   GROUP BY bootstrap_index
--- ),
+bootstrap_avg AS (
+  SELECT bootstrap_index,
+    sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg
+  FROM bootstrap_weights
+  GROUP BY bootstrap_index
+),
 bootstrap AS (
   SELECT bootstrap_index,
-    sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg,
-    sqrt(sum(bootstrap_weight * power(converted - ((sum(bootstrap_weight * converted) OVER (PARTITION BY bootstrap_index)) /
-      (sum(bootstrap_weight) OVER (PARTITION BY bootstrap_index))), 2)) /
+    max(rate_avg) AS rate_avg,
+    sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
       sum(bootstrap_weight)) AS rate_sd
   FROM bootstrap_weights
+  JOIN bootstrap_avg USING (bootstrap_index)
   GROUP BY bootstrap_index
 ),
 sample AS (
@@ -87,11 +48,9 @@ sample AS (
 bootstrap_q AS (
   SELECT
     percentile_cont(0.025) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd
-    ) AS q_lo,
+      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_lo,
     percentile_cont(0.975) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd
-    ) AS q_hi
+      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_hi
   FROM bootstrap
   JOIN sample ON TRUE
 )

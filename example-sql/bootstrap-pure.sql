@@ -1,4 +1,4 @@
-explain WITH bootstrap_indexes AS (
+WITH bootstrap_indexes AS (
   SELECT generate_series(1, 1000) AS bootstrap_index
 ),
 bootstrap_data AS (
@@ -27,11 +27,9 @@ sample AS (
 bootstrap_q AS (
   SELECT
     percentile_cont(0.025) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd
-    ) AS q_lo,
+      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_lo,
     percentile_cont(0.975) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd
-    ) AS q_hi
+      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_hi
   FROM bootstrap
   JOIN sample ON TRUE
 )

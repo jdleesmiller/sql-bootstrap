@@ -3,7 +3,7 @@ WITH bootstrap_indexes AS (
 ),
 bootstrap_data AS (
   SELECT converted, bootstrap_index, rand() AS bootstrap_u
-  FROM `sql_bootstrap.hits_3` hits
+  FROM `sql_bootstrap.hits` hits
   JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_weights AS (
@@ -43,16 +43,14 @@ bootstrap AS (
 ),
 sample AS (
   SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd
-  FROM `sql_bootstrap.hits_3` hits
+  FROM `sql_bootstrap.hits` hits
 ),
 bootstrap_q AS (
   SELECT
-    percentile_cont(
-      (bootstrap.rate_avg - sample.rate_avg) /
-        bootstrap.rate_sd, 0.025) OVER () AS q_lo,
-    percentile_cont(
-      (bootstrap.rate_avg - sample.rate_avg) /
-        bootstrap.rate_sd, 0.975) OVER () AS q_hi,
+    percentile_cont((bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd,
+      0.025) OVER () AS q_lo,
+    percentile_cont((bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd,
+      0.975) OVER () AS q_hi
   FROM bootstrap
   JOIN sample ON TRUE
   LIMIT 1

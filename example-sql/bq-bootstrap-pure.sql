@@ -26,12 +26,10 @@ sample AS (
 ),
 bootstrap_q AS (
   SELECT
-    percentile_cont(
-      (bootstrap.rate_avg - sample.rate_avg) /
-        bootstrap.rate_sd, 0.025) OVER () AS q_lo,
-    percentile_cont(
-      (bootstrap.rate_avg - sample.rate_avg) /
-        bootstrap.rate_sd, 0.975) OVER () AS q_hi,
+    percentile_cont((bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd,
+      0.025) OVER () AS q_lo,
+    percentile_cont((bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd,
+      0.975) OVER () AS q_hi
   FROM bootstrap
   JOIN sample ON TRUE
   LIMIT 1

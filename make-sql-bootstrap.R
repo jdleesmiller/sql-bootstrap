@@ -4,7 +4,6 @@ buildBootstrapSql <- function (
   numReplicates,
   dataTable,
   dataTableIdColumn = 'created_at',
-  measureSql = 'CASE WHEN converted THEN 1.0 ELSE 0.0 END',
   kind = 'pure',
   dialect = 'pg',
   schema = 'none'
@@ -43,12 +42,15 @@ buildBootstrapSql <- function (
                numReplicates, ')) AS bootstrap_index')
   }
 
-  buildPercentileSql <- function (quantile, column) {
+  buildPercentileSql <- function (quantile, expression, indent) {
     if (dialect == 'pg')
-      paste0('percentile_cont(', quantile,
-               ') WITHIN GROUP (ORDER BY ', column, ')')
+      paste0(
+        'percentile_cont(', quantile, ') WITHIN GROUP (ORDER BY\n',
+        indent, '  ', expression, ')')
     else
-      paste0('percentile_cont(', column, ', ', quantile,') OVER ()')
+      paste0(
+        'percentile_cont(', expression, ',\n',
+        indent, '  ', quantile, ') OVER ()')
   }
 
   ctes <- paste0(
@@ -60,7 +62,7 @@ buildBootstrapSql <- function (
       ctes,
       paste0(
         'bootstrap_data AS (\n',
-        '  SELECT ', dataTable, '.*,',
+        '  SELECT converted,',
         ' ROW_NUMBER() OVER (ORDER BY ', dataTableIdColumn, ') - 1',
         ' AS data_index\n',
         '  FROM ', dataTableFrom,
@@ -76,8 +78,10 @@ buildBootstrapSql <- function (
         '\n)'
       ),
       paste0(
-        'bootstrap_measures AS (\n',
-        '  SELECT bootstrap_index, avg(', measureSql, ') AS measure\n',
+        'bootstrap AS (\n',
+        '  SELECT bootstrap_index,\n',
+        '    avg(converted) AS rate_avg,\n',
+        '    stddev(converted) AS rate_sd\n',
         '  FROM bootstrap_map\n',
         '  JOIN bootstrap_data USING (data_index)\n',
         '  GROUP BY bootstrap_index',
@@ -88,8 +92,8 @@ buildBootstrapSql <- function (
     ctes <- c(
       ctes,
       paste0(
-        'bootstrap_variates AS (\n',
-        '  SELECT ', dataTable, '.*, bootstrap_index, ',
+        'bootstrap_data AS (\n',
+        '  SELECT converted, bootstrap_index, ',
           random, '() AS bootstrap_u\n',
         '  FROM ', dataTableFrom, '\n',
         '  JOIN bootstrap_indexes ON TRUE',
@@ -97,37 +101,51 @@ buildBootstrapSql <- function (
       ),
       paste0(
         'bootstrap_weights AS (\n',
-        '  SELECT bootstrap_variates.*, (',
+        '  SELECT bootstrap_data.*, (',
         buildPoissonSql('bootstrap_u'), ') AS bootstrap_weight\n',
-        '  FROM bootstrap_variates',
+        '  FROM bootstrap_data',
         '\n)'
       ),
       paste0(
-        'bootstrap_measures AS (\n',
+        'bootstrap_avg AS (\n',
         '  SELECT bootstrap_index,\n',
-        '  sum(bootstrap_weight * (', measureSql, ')) /\n',
-        '    sum(bootstrap_weight) AS measure\n',
+        '    sum(bootstrap_weight * converted) /',
+        ' sum(bootstrap_weight) AS rate_avg\n',
         '  FROM bootstrap_weights\n',
+        '  GROUP BY bootstrap_index',
+        '\n)'
+      ),
+      paste0(
+        'bootstrap AS (\n',
+        '  SELECT bootstrap_index,\n',
+        '    max(rate_avg) AS rate_avg,\n',
+        '    sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /\n',
+        '      sum(bootstrap_weight)) AS rate_sd\n',
+        '  FROM bootstrap_weights\n',
+        '  JOIN bootstrap_avg USING (bootstrap_index)\n',
         '  GROUP BY bootstrap_index',
         '\n)'
       )
     )
   }
 
+  tSql <- '(bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd'
   ctes <- c(
     ctes,
     paste0(
-      'bootstrap_ci AS (\n',
-      '  SELECT\n',
-      '    ', buildPercentileSql(0.025, 'measure'), ' AS measure_lo,\n',
-      '    ', buildPercentileSql(0.975, 'measure'), ' AS measure_hi\n',
-      '  FROM bootstrap_measures',
-      if (dialect == 'bq') '\n  LIMIT 1' else '',
-      '\n)'),
-    paste0(
-      'sample_measures AS (\n',
-      '  SELECT avg(', measureSql, ') AS measure_avg\n',
+      'sample AS (\n',
+      '  SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd\n',
       '  FROM ', dataTableFrom,
+      '\n)'
+    ),
+    paste0(
+      'bootstrap_q AS (\n',
+      '  SELECT\n',
+      '    ', buildPercentileSql(0.025, tSql, '    '), ' AS q_lo,\n',
+      '    ', buildPercentileSql(0.975, tSql, '    '), ' AS q_hi\n',
+      '  FROM bootstrap\n',
+      '  JOIN sample ON TRUE',
+      if (dialect == 'bq') '\n  LIMIT 1' else '',
       '\n)'
     )
   )
@@ -135,9 +153,11 @@ buildBootstrapSql <- function (
   paste0(
     paste(ctes, collapse = ',\n'),
     '\n',
-    'SELECT *\n',
-    'FROM sample_measures\n',
-    'JOIN bootstrap_ci ON TRUE;',
+    'SELECT sample.rate_avg,\n',
+    '  sample.rate_avg - sample.rate_sd * q_hi AS rate_lo,\n',
+    '  sample.rate_avg - sample.rate_sd * q_lo AS rate_hi\n',
+    'FROM sample\n',
+    'JOIN bootstrap_q ON TRUE;',
     '\n'
   )
 }
