@@ -4,7 +4,7 @@ R ?= Rscript --vanilla
 
 GCP_REGION ?= europe-west2
 CLOUD_SQL_PROJECT ?= sql-bootstrap
-CLOUD_SQL_INSTANCE ?= sql-bootstrap-2
+CLOUD_SQL_INSTANCE ?= sql-bootstrap-1
 
 PSQL_SCHEMA ?= sql_bootstrap
 BQ_DATASET ?= sql_bootstrap
@@ -29,8 +29,8 @@ HITS_CSVS = $(wildcard example-data/hits-*.csv)
 	touch $@
 .flags/pg-hits-%.csv: example-data/hits-%.csv
 	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).hits_$*'
-	$(PSQL) --command 'CREATE TABLE $(PSQL_SCHEMA).hits_$* \
-	  (created_at TIMESTAMP NOT NULL, converted DOUBLE PRECISION NOT NULL)'
+	$(PSQL) --command "CREATE TABLE $(PSQL_SCHEMA).hits_$* \
+	  (created_at TIMESTAMP NOT NULL, converted DOUBLE PRECISION NOT NULL)"
 	$(PSQL) --command '\COPY $(PSQL_SCHEMA).hits_$* FROM $< WITH CSV HEADER'
 	touch $@
 pg-load: .flags/pg-schema
@@ -98,16 +98,17 @@ doc: doc/cats-example.svg
 
 cloud-sql-instance:
 	@test -n "$(CLOUD_SQL_PGPASSWORD)"
-	gcloud sql instances create $(CLOUD_SQL_INSTANCE) --cpu=8 --memory=16384MB \
+	gcloud sql instances create $(CLOUD_SQL_INSTANCE) --cpu=4 --memory=16384MB \
 		--database-version=POSTGRES_13 --region=$(GCP_REGION)
 	@gcloud sql users set-password postgres --instance=$(CLOUD_SQL_INSTANCE) \
 		--password="$(CLOUD_SQL_PGPASSWORD)"
 	gcloud sql instances patch $(CLOUD_SQL_INSTANCE) \
 	  --database-flags temp_file_limit=335544320
 
+bin/cloud_sql_proxy: ARCH ?= $(shell uname | tr '[:upper:]' '[:lower:]')
 bin/cloud_sql_proxy:
 	mkdir -p bin
-	curl -o $@ https://dl.google.com/cloudsql/cloud_sql_proxy.darwin.amd64
+	curl -o $@ https://dl.google.com/cloudsql/cloud_sql_proxy.$(ARCH).amd64
 	chmod +x $@
 
 cloud-sql-proxy: bin/cloud_sql_proxy

@@ -13,7 +13,7 @@ schema <- 'sql_bootstrap'
 
 stopifnot(nchar(resultsFile) > 0)
 stopifnot(dialect %in% c('pg', 'bq'))
-stopifnot(numTrials > 0)
+stopifnot(numTrials %in% c(10, 100))
 stopifnot(nchar(command) > 0)
 
 if (file.exists(resultsFile)) {
@@ -30,7 +30,7 @@ if (file.exists(resultsFile)) {
 }
 results <- fread(resultsFile)
 
-examples <- fread('example-data/examples.csv')
+examples <- fread('example-data/examples.csv')[conversionRate == 0.01]
 
 grid <- merge(
   CJ(
@@ -48,19 +48,20 @@ if (dialect == 'bq') {
   # reserved slots.)
   grid <- grid[
     (kind == 'poisson' | replicates < 2000) &
-    (numHitsOrder < 7 | replicates < 1000)]
+    (numHitsOrder < 8 | replicates < 1000)]
 } else {
   # Larger examples take a while; thin out the grid.
   grid <- grid[
-    (numHitsOrder < 6) |
-    (numHitsOrder == 6 & conversionRate == 0.01 &
-      replicates %in% c(500, 1000) & trial <= 3)
+    (numHitsOrder < 6) | (
+      numHitsOrder == 6 & trial <= 5 & replicates %in% c(1000))
   ]
 }
 
-# For checking the CIs, we need more than 10 trials.
 if (numTrials == 100) {
-  grid <- grid[numHitsOrder == 4]
+  # For checking the interval rather than benchmarkings
+  grid <- grid[numHitsOrder %in% c(4, 5)]
+} else {
+  grid <- grid[replicates %in% c(1000, 2000)]
 }
 
 runQuery <- function(query) {
