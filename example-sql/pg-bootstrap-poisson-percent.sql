@@ -1,9 +1,9 @@
 WITH bootstrap_indexes AS (
-  SELECT * FROM UNNEST(generate_array(1, 1000)) AS bootstrap_index
+  SELECT generate_series(1, 1000) AS bootstrap_index
 ),
 bootstrap_data AS (
-  SELECT mass, bootstrap_index, rand() AS bootstrap_u
-  FROM `sql_bootstrap.cats` cats
+  SELECT mass, bootstrap_index, random() AS bootstrap_u
+  FROM cats
   JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_weights AS (
@@ -26,37 +26,22 @@ bootstrap_weights AS (
     ELSE 15 END) AS bootstrap_weight
   FROM bootstrap_data
 ),
-bootstrap_avg AS (
+bootstrap AS (
   SELECT bootstrap_index,
     sum(bootstrap_weight * mass) / sum(bootstrap_weight) AS mass_avg
   FROM bootstrap_weights
   GROUP BY bootstrap_index
 ),
-bootstrap AS (
-  SELECT bootstrap_index,
-    max(mass_avg) AS mass_avg,
-    sqrt(sum(bootstrap_weight * power(mass - mass_avg, 2)) /
-      sum(bootstrap_weight)) AS mass_sd
-  FROM bootstrap_weights
-  JOIN bootstrap_avg USING (bootstrap_index)
-  GROUP BY bootstrap_index
+bootstrap_ci AS (
+  SELECT
+    percentile_cont(0.025) WITHIN GROUP (ORDER BY mass_avg) AS mass_lo,
+    percentile_cont(0.975) WITHIN GROUP (ORDER BY mass_avg) AS mass_hi
+  FROM bootstrap
 ),
 sample AS (
-  SELECT avg(mass) AS mass_avg, stddev(mass) AS mass_sd
-  FROM `sql_bootstrap.cats` cats
-),
-bootstrap_q AS (
-  SELECT
-    percentile_cont((bootstrap.mass_avg - sample.mass_avg) / bootstrap.mass_sd,
-      0.025) OVER () AS q_lo,
-    percentile_cont((bootstrap.mass_avg - sample.mass_avg) / bootstrap.mass_sd,
-      0.975) OVER () AS q_hi
-  FROM bootstrap
-  JOIN sample ON TRUE
-  LIMIT 1
+  SELECT avg(mass) AS mass_avg
+  FROM cats
 )
-SELECT sample.mass_avg,
-  sample.mass_avg - sample.mass_sd * q_hi AS mass_lo,
-  sample.mass_avg - sample.mass_sd * q_lo AS mass_hi
+SELECT *
 FROM sample
-JOIN bootstrap_q ON TRUE;
+JOIN bootstrap_ci ON TRUE;

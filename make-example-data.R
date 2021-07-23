@@ -1,32 +1,25 @@
 #!/usr/bin/env Rscript
 
+library(data.table)
+
 dataDir <- 'example-data'
-hitCreationRate <- 0.1 # per second
-startTime <- as.POSIXct('2021-01-01', tz = 'UTC')
 
 set.seed(8248246)
 options(digits.secs = 3)
 
-generateExampleData <- function (conversionRate, numHits) {
-  createdAt <- startTime + cumsum(rexp(numHits, hitCreationRate))
-  converted <- ifelse(runif(numHits) < conversionRate, 1, 0)
-  data.frame(created_at = createdAt, converted = converted)
-}
+trueMean <- 4.5
+trueSd <- 1
+numCatsOrder <- 3:7
+examples <- CJ(trueMean, trueSd, numCatsOrder)
+examples[, id := 1:nrow(examples)]
+examples[, file := file.path(dataDir, paste0('cats-', examples$id, '.csv'))]
+examples[, tableName := paste('cats', examples$id, sep = '_')]
 
-examples <- merge(
-  data.frame(conversionRate = c(0.01, 0.02)),
-  data.frame(numHitsOrder = c(3, 4, 5, 6, 7)), by = NULL)
-examples <- cbind(id = 1:nrow(examples), examples)
-examples$file <- file.path(dataDir, paste0('hits-', examples$id, '.csv'))
-examples$tableName <- paste('hits', examples$id, sep = '_')
-
-invisible(by(examples, 1:nrow(examples), function (example) {
-  data <- generateExampleData(example$conversionRate, 10 ^ example$numHitsOrder)
-  write.csv(data, file = example$file, row.names = FALSE)
+invisible(by(examples, examples$id, function (example) {
+  n <- 10^example$numCatsOrder
+  data <- data.table(id = 1:n, mass = rnorm(n, trueMean, trueSd))
+  fwrite(data, file = example$file)
   NULL
 }))
 
-write.csv(
-  examples,
-  file = file.path(dataDir, 'examples.csv'),
-  row.names = FALSE)
+fwrite(examples, file = file.path(dataDir, 'examples.csv'))

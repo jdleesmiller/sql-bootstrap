@@ -22,44 +22,44 @@ example-data/examples.csv: make-example-data.R
 	Rscript --vanilla make-example-data.R
 example-data: example-data/examples.csv
 
-HITS_CSVS = $(wildcard example-data/hits-*.csv)
+CATS_CSVS = $(wildcard example-data/cats-*.csv)
 
 .flags/pg-schema:
 	$(PSQL) --command 'CREATE SCHEMA IF NOT EXISTS $(PSQL_SCHEMA)'
 	touch $@
-.flags/pg-hits-%.csv: example-data/hits-%.csv
-	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).hits_$*'
-	$(PSQL) --command "CREATE TABLE $(PSQL_SCHEMA).hits_$* \
-	  (created_at TIMESTAMP NOT NULL, converted DOUBLE PRECISION NOT NULL)"
-	$(PSQL) --command '\COPY $(PSQL_SCHEMA).hits_$* FROM $< WITH CSV HEADER'
+.flags/pg-cats-%.csv: example-data/cats-%.csv
+	$(PSQL) --command 'DROP TABLE IF EXISTS $(PSQL_SCHEMA).cats_$*'
+	$(PSQL) --command "CREATE TABLE $(PSQL_SCHEMA).cats_$* \
+	  (id INTEGER NOT NULL, mass DOUBLE PRECISION NOT NULL)"
+	$(PSQL) --command '\COPY $(PSQL_SCHEMA).cats_$* FROM $< WITH CSV HEADER'
 	touch $@
 pg-load: .flags/pg-schema
-pg-load: $(patsubst example-data/hits-%.csv,.flags/pg-hits-%.csv,$(HITS_CSVS))
+pg-load: $(patsubst example-data/cats-%.csv,.flags/pg-cats-%.csv,$(CATS_CSVS))
 
 pg-drop:
 	$(PSQL) --command 'DROP SCHEMA IF EXISTS $(PSQL_SCHEMA) CASCADE'
 	rm -f .flags/pg-*
 
 pg-test: pg-load
-	$(R) make-sql-bootstrap.R 1000 hits_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
+	$(R) make-sql-bootstrap.R 1000 cats_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
 
 .flags/bq-dataset:
 	$(BQ) mk --force --data_location=$(GCP_REGION) --dataset $(BQ_DATASET)
 	touch $@
-.flags/bq-hits-%.csv: example-data/hits-%.csv
-	$(BQ) rm --force --table $(BQ_DATASET).hits_$*
+.flags/bq-cats-%.csv: example-data/cats-%.csv
+	$(BQ) rm --force --table $(BQ_DATASET).cats_$*
 	$(BQ) load --skip_leading_rows=1 \
-	  $(BQ_DATASET).hits_$* $< created_at:timestamp,converted:float64
+	  $(BQ_DATASET).cats_$* $< id:integer,mass:float64
 	touch $@
 bq-load: .flags/bq-dataset
-bq-load: $(patsubst example-data/hits-%.csv,.flags/bq-hits-%.csv,$(HITS_CSVS))
+bq-load: $(patsubst example-data/cats-%.csv,.flags/bq-cats-%.csv,$(CATS_CSVS))
 
 bq-drop:
 	$(BQ) rm --force --recursive $(BQ_DATASET)
 	rm -f .flags/bq-*
 
 bq-test:
-	$(R) make-sql-bootstrap.R 1000 hits_1 poisson bq $(BQ_DATASET) | \
+	$(R) make-sql-bootstrap.R 1000 cats_1 poisson student bq $(BQ_DATASET) | \
 		$(BQ) --location=$(GCP_REGION) query --use_legacy_sql=false
 
 benchmark-pg.csv: benchmark.R pg-load
@@ -77,20 +77,25 @@ benchmark: benchmark-pg.csv benchmark-bq.csv
 check.csv: check.R example-data
 	$(R) $< $@
 
-example-sql/bootstrap-pure.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits pure pg none > $@
+EXAMPLE_DIALECT := pg bq
+EXAMPLE_BOOTSTRAP_KIND := pure poisson
+EXAMPLE_INTERVAL_TYPE := percent student
+EXAMPLE_FILE = example-sql/$(dialect)-bootstrap-$(kind)-$(type).sql
+define EXAMPLE_RULE
+examples: $(EXAMPLE_FILE)
+$(EXAMPLE_FILE): make-sql-bootstrap.R
+	$(R) make-sql-bootstrap.R 1000 cats $(kind) $(type) $(dialect) \
+		$(if $(filter bq,$(dialect)),$(BQ_DATASET),none) \
+		> $(EXAMPLE_FILE)
+endef
 
-example-sql/bootstrap-poisson.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits poisson pg none > $@
-
-example-sql/bq-bootstrap-pure.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits pure bq $(BQ_DATASET) > $@
-
-example-sql/bq-bootstrap-poisson.sql: make-sql-bootstrap.R
-	$(R) $< 1000 hits poisson bq $(BQ_DATASET) > $@
-
-examples:	example-sql/bootstrap-pure.sql example-sql/bootstrap-poisson.sql
-examples:	example-sql/bq-bootstrap-pure.sql example-sql/bq-bootstrap-poisson.sql
+$(foreach dialect,$(EXAMPLE_DIALECT), \
+  $(foreach kind,$(EXAMPLE_BOOTSTRAP_KIND), \
+	$(foreach type,$(EXAMPLE_INTERVAL_TYPE), \
+	  $(eval $(EXAMPLE_RULE)) \
+	) \
+  ) \
+)
 
 doc/cats-example.svg: doc/cats-example.R
 	$(R) $<

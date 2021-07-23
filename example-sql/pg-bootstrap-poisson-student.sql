@@ -2,8 +2,8 @@ WITH bootstrap_indexes AS (
   SELECT generate_series(1, 1000) AS bootstrap_index
 ),
 bootstrap_data AS (
-  SELECT converted, bootstrap_index, random() AS bootstrap_u
-  FROM hits
+  SELECT mass, bootstrap_index, random() AS bootstrap_u
+  FROM cats
   JOIN bootstrap_indexes ON TRUE
 ),
 bootstrap_weights AS (
@@ -28,34 +28,34 @@ bootstrap_weights AS (
 ),
 bootstrap_avg AS (
   SELECT bootstrap_index,
-    sum(bootstrap_weight * converted) / sum(bootstrap_weight) AS rate_avg
+    sum(bootstrap_weight * mass) / sum(bootstrap_weight) AS mass_avg
   FROM bootstrap_weights
   GROUP BY bootstrap_index
 ),
 bootstrap AS (
   SELECT bootstrap_index,
-    max(rate_avg) AS rate_avg,
-    sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /
-      sum(bootstrap_weight)) AS rate_sd
+    max(mass_avg) AS mass_avg,
+    sqrt(sum(bootstrap_weight * power(mass - mass_avg, 2)) /
+      sum(bootstrap_weight)) AS mass_sd
   FROM bootstrap_weights
   JOIN bootstrap_avg USING (bootstrap_index)
   GROUP BY bootstrap_index
 ),
 sample AS (
-  SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd
-  FROM hits
+  SELECT avg(mass) AS mass_avg, stddev(mass) AS mass_sd
+  FROM cats
 ),
 bootstrap_q AS (
   SELECT
     percentile_cont(0.025) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_lo,
+      (bootstrap.mass_avg - sample.mass_avg) / bootstrap.mass_sd) AS q_lo,
     percentile_cont(0.975) WITHIN GROUP (ORDER BY
-      (bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd) AS q_hi
+      (bootstrap.mass_avg - sample.mass_avg) / bootstrap.mass_sd) AS q_hi
   FROM bootstrap
   JOIN sample ON TRUE
 )
-SELECT sample.rate_avg,
-  sample.rate_avg - sample.rate_sd * q_hi AS rate_lo,
-  sample.rate_avg - sample.rate_sd * q_lo AS rate_hi
+SELECT sample.mass_avg,
+  sample.mass_avg - sample.mass_sd * q_hi AS mass_lo,
+  sample.mass_avg - sample.mass_sd * q_lo AS mass_hi
 FROM sample
 JOIN bootstrap_q ON TRUE;

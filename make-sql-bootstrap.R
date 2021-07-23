@@ -3,8 +3,9 @@
 buildBootstrapSql <- function (
   numReplicates,
   dataTable,
-  dataTableIdColumn = 'created_at',
-  kind = 'pure',
+  dataTableIdColumn = 'id',
+  bootstrapKind = 'pure',
+  intervalType = 'percent',
   dialect = 'pg',
   schema = 'none'
 ) {
@@ -45,24 +46,24 @@ buildBootstrapSql <- function (
   buildPercentileSql <- function (quantile, expression, indent) {
     if (dialect == 'pg')
       paste0(
-        'percentile_cont(', quantile, ') WITHIN GROUP (ORDER BY\n',
-        indent, '  ', expression, ')')
+        'percentile_cont(', quantile, ') WITHIN GROUP (ORDER BY',
+        indent, expression, ')')
     else
       paste0(
-        'percentile_cont(', expression, ',\n',
-        indent, '  ', quantile, ') OVER ()')
+        'percentile_cont(', expression, ',',
+        indent, quantile, ') OVER ()')
   }
 
   ctes <- paste0(
     'WITH bootstrap_indexes AS (\n  ', buildBootstrapIndexesSql(), '\n)'
   )
 
-  if (kind == 'pure') {
+  if (bootstrapKind == 'pure') {
     ctes <- c(
       ctes,
       paste0(
         'bootstrap_data AS (\n',
-        '  SELECT converted,',
+        '  SELECT mass,',
         ' ROW_NUMBER() OVER (ORDER BY ', dataTableIdColumn, ') - 1',
         ' AS data_index\n',
         '  FROM ', dataTableFrom,
@@ -80,8 +81,14 @@ buildBootstrapSql <- function (
       paste0(
         'bootstrap AS (\n',
         '  SELECT bootstrap_index,\n',
-        '    avg(converted) AS rate_avg,\n',
-        '    stddev(converted) AS rate_sd\n',
+        if (intervalType == 'percent') {
+            '    avg(mass) AS mass_avg\n'
+        } else {
+          c(
+            '    avg(mass) AS mass_avg,\n',
+            '    stddev(mass) AS mass_sd\n'
+          )
+        },
         '  FROM bootstrap_map\n',
         '  JOIN bootstrap_data USING (data_index)\n',
         '  GROUP BY bootstrap_index',
@@ -93,7 +100,7 @@ buildBootstrapSql <- function (
       ctes,
       paste0(
         'bootstrap_data AS (\n',
-        '  SELECT converted, bootstrap_index, ',
+        '  SELECT mass, bootstrap_index, ',
           random, '() AS bootstrap_u\n',
         '  FROM ', dataTableFrom, '\n',
         '  JOIN bootstrap_indexes ON TRUE',
@@ -106,75 +113,121 @@ buildBootstrapSql <- function (
         '  FROM bootstrap_data',
         '\n)'
       ),
-      paste0(
-        'bootstrap_avg AS (\n',
-        '  SELECT bootstrap_index,\n',
-        '    sum(bootstrap_weight * converted) /',
-        ' sum(bootstrap_weight) AS rate_avg\n',
-        '  FROM bootstrap_weights\n',
-        '  GROUP BY bootstrap_index',
-        '\n)'
-      ),
-      paste0(
-        'bootstrap AS (\n',
-        '  SELECT bootstrap_index,\n',
-        '    max(rate_avg) AS rate_avg,\n',
-        '    sqrt(sum(bootstrap_weight * power(converted - rate_avg, 2)) /\n',
-        '      sum(bootstrap_weight)) AS rate_sd\n',
-        '  FROM bootstrap_weights\n',
-        '  JOIN bootstrap_avg USING (bootstrap_index)\n',
-        '  GROUP BY bootstrap_index',
-        '\n)'
-      )
+      if (intervalType == 'percent') {
+        paste0(
+          'bootstrap AS (\n',
+          '  SELECT bootstrap_index,\n',
+          '    sum(bootstrap_weight * mass) /',
+          ' sum(bootstrap_weight) AS mass_avg\n',
+          '  FROM bootstrap_weights\n',
+          '  GROUP BY bootstrap_index',
+          '\n)'
+        )
+      } else {
+        c(
+          paste0(
+            'bootstrap_avg AS (\n',
+            '  SELECT bootstrap_index,\n',
+            '    sum(bootstrap_weight * mass) /',
+            ' sum(bootstrap_weight) AS mass_avg\n',
+            '  FROM bootstrap_weights\n',
+            '  GROUP BY bootstrap_index',
+            '\n)'
+          ),
+          paste0(
+            'bootstrap AS (\n',
+            '  SELECT bootstrap_index,\n',
+            '    max(mass_avg) AS mass_avg,\n',
+            '    sqrt(sum(bootstrap_weight * power(mass - mass_avg, 2)) /\n',
+            '      sum(bootstrap_weight)) AS mass_sd\n',
+            '  FROM bootstrap_weights\n',
+            '  JOIN bootstrap_avg USING (bootstrap_index)\n',
+            '  GROUP BY bootstrap_index',
+            '\n)'
+          )
+        )
+      }
     )
   }
 
-  tSql <- '(bootstrap.rate_avg - sample.rate_avg) / bootstrap.rate_sd'
-  ctes <- c(
-    ctes,
-    paste0(
-      'sample AS (\n',
-      '  SELECT avg(converted) AS rate_avg, stddev(converted) AS rate_sd\n',
-      '  FROM ', dataTableFrom,
-      '\n)'
-    ),
-    paste0(
-      'bootstrap_q AS (\n',
-      '  SELECT\n',
-      '    ', buildPercentileSql(0.025, tSql, '    '), ' AS q_lo,\n',
-      '    ', buildPercentileSql(0.975, tSql, '    '), ' AS q_hi\n',
-      '  FROM bootstrap\n',
-      '  JOIN sample ON TRUE',
-      if (dialect == 'bq') '\n  LIMIT 1' else '',
-      '\n)'
+  if (intervalType == 'percent') {
+    ctes <- c(
+      ctes,
+      paste0(
+        'bootstrap_ci AS (\n',
+        '  SELECT\n',
+        '    ', buildPercentileSql(0.025, 'mass_avg', ' '), ' AS mass_lo,\n',
+        '    ', buildPercentileSql(0.975, 'mass_avg', ' '), ' AS mass_hi\n',
+        '  FROM bootstrap',
+        if (dialect == 'bq') '\n  LIMIT 1' else '',
+        '\n)'),
+      paste0(
+        'sample AS (\n',
+        '  SELECT avg(mass) AS mass_avg\n',
+        '  FROM ', dataTableFrom,
+        '\n)'
+      )
     )
-  )
 
-  paste0(
-    paste(ctes, collapse = ',\n'),
-    '\n',
-    'SELECT sample.rate_avg,\n',
-    '  sample.rate_avg - sample.rate_sd * q_hi AS rate_lo,\n',
-    '  sample.rate_avg - sample.rate_sd * q_lo AS rate_hi\n',
-    'FROM sample\n',
-    'JOIN bootstrap_q ON TRUE;',
-    '\n'
-  )
+    paste0(
+      paste(ctes, collapse = ',\n'),
+      '\n',
+      'SELECT *\n',
+      'FROM sample\n',
+      'JOIN bootstrap_ci ON TRUE;',
+      '\n'
+    )
+  } else {
+    indent <- '\n      '
+    tSql <- '(bootstrap.mass_avg - sample.mass_avg) / bootstrap.mass_sd'
+    ctes <- c(
+      ctes,
+      paste0(
+        'sample AS (\n',
+        '  SELECT avg(mass) AS mass_avg, stddev(mass) AS mass_sd\n',
+        '  FROM ', dataTableFrom,
+        '\n)'
+      ),
+      paste0(
+        'bootstrap_q AS (\n',
+        '  SELECT\n',
+        '    ', buildPercentileSql(0.025, tSql, indent), ' AS q_lo,\n',
+        '    ', buildPercentileSql(0.975, tSql, indent), ' AS q_hi\n',
+        '  FROM bootstrap\n',
+        '  JOIN sample ON TRUE',
+        if (dialect == 'bq') '\n  LIMIT 1' else '',
+        '\n)'
+      )
+    )
+
+    paste0(
+      paste(ctes, collapse = ',\n'),
+      '\n',
+      'SELECT sample.mass_avg,\n',
+      '  sample.mass_avg - sample.mass_sd * q_hi AS mass_lo,\n',
+      '  sample.mass_avg - sample.mass_sd * q_lo AS mass_hi\n',
+      'FROM sample\n',
+      'JOIN bootstrap_q ON TRUE;',
+      '\n'
+    )
+  }
 }
 
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
   stopifnot(grepl('^\\d+$', args[1]))
-  stopifnot(grepl('^hits', args[2]))
+  stopifnot(grepl('^cats', args[2]))
   stopifnot(args[3] %in% c('pure', 'poisson'))
-  stopifnot(args[4] %in% c('pg', 'bq'))
-  stopifnot(args[5] %in% c('sql_bootstrap', 'none'))
+  stopifnot(args[4] %in% c('percent', 'student'))
+  stopifnot(args[5] %in% c('pg', 'bq'))
+  stopifnot(args[6] %in% c('sql_bootstrap', 'none'))
 
   cat(buildBootstrapSql(
     numReplicates = as.numeric(args[1]),
     dataTable = args[2],
-    kind = args[3],
-    dialect = args[4],
-    schema = args[5]
+    bootstrapKind = args[3],
+    intervalType = args[4],
+    dialect = args[5],
+    schema = args[6]
   ))
 }
