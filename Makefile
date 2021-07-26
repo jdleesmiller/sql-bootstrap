@@ -41,7 +41,7 @@ pg-drop:
 	rm -f .flags/pg-*
 
 pg-test: pg-load
-	$(R) make-sql-bootstrap.R 1000 cats_1 poisson pg $(PSQL_SCHEMA) | $(PSQL)
+	$(R) make-sql-bootstrap.R 1000 cats_1 poisson student pg $(PSQL_SCHEMA) | $(PSQL)
 
 .flags/bq-dataset:
 	$(BQ) mk --force --data_location=$(GCP_REGION) --dataset $(BQ_DATASET)

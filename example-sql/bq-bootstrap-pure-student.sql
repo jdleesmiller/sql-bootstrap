@@ -15,12 +15,6 @@ bootstrap_map AS (
 bootstrap AS (
   SELECT bootstrap_index,
     avg(mass) AS mass_avg,
-  FROM bootstrap_map
-  JOIN bootstrap_data USING (data_index)
-  GROUP BY bootstrap_index
-),
-bootstrap AS (
-  SELECT bootstrap_index,
     stddev(mass) AS mass_sd
   FROM bootstrap_map
   JOIN bootstrap_data USING (data_index)

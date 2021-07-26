@@ -84,7 +84,7 @@ buildBootstrapSql <- function (
         if (intervalType == 'percent') {
             '    avg(mass) AS mass_avg\n'
         } else {
-          c(
+          paste0(
             '    avg(mass) AS mass_avg,\n',
             '    stddev(mass) AS mass_sd\n'
           )
