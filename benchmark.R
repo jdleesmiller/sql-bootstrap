@@ -25,18 +25,19 @@ if (file.exists(resultsFile)) {
     copy.date = TRUE))
 } else {
   cat(
-    'exampleId,replicates,kind,trial,measureAvg,measureLo,measureHi,elapsed\n',
+    'exampleId,replicates,kind,type,trial,measureAvg,measureLo,measureHi,elapsed\n',
     file = resultsFile)
 }
 results <- fread(resultsFile)
 
-examples <- fread('example-data/examples.csv')[conversionRate == 0.01]
+examples <- fread('example-data/examples.csv')
 
 grid <- merge(
   CJ(
     exampleId = examples$id,
     replicates = c(125, 250, 500, 1000, 2000),
     kind = c('pure', 'poisson'),
+    type = c('percent', 'student'),
     trial = 1:numTrials
   ),
   examples, by.x = 'exampleId', by.y = 'id'
@@ -44,22 +45,22 @@ grid <- merge(
 
 if (dialect == 'bq') {
   # We hit the 2500 cpu-second limit for 'pure' with 2000 replicates, and for
-  # 'poisson' as well with 1000 replicates with 10^7 hits. (Unless using
+  # 'poisson' as well with 1000 replicates with 10^7 cats. (Unless using
   # reserved slots.)
   grid <- grid[
     (kind == 'poisson' | replicates < 2000) &
-    (numHitsOrder < 8 | replicates < 1000)]
+    (numCatsOrder < 8 | replicates < 1000)]
 } else {
   # Larger examples take a while; thin out the grid.
   grid <- grid[
-    (numHitsOrder < 6) | (
-      numHitsOrder == 6 & trial <= 5 & replicates %in% c(1000))
+    (numCatsOrder < 6) | (
+      numCatsOrder == 6 & trial <= 5 & replicates %in% c(1000))
   ]
 }
 
 if (numTrials == 100) {
   # For checking the interval rather than benchmarkings
-  grid <- grid[numHitsOrder %in% c(4, 5)]
+  grid <- grid[numCatsOrder %in% c(4, 5)]
 } else {
   grid <- grid[replicates %in% c(1000, 2000)]
 }
@@ -96,6 +97,7 @@ invisible(by(grid, 1:nrow(grid), function (trialData) {
     exampleId == trialData$exampleId &
     replicates == trialData$replicates &
     kind == trialData$kind &
+    type == trialData$type &
     trial == trialData$trial)]
   ) {
     print(trialData[, 1:4])
@@ -103,11 +105,12 @@ invisible(by(grid, 1:nrow(grid), function (trialData) {
       , buildBootstrapSql(
           numReplicates = replicates,
           dataTable = tableName,
-          kind = kind,
+          bootstrapKind = kind,
+          intervalType = type,
           dialect = dialect,
           schema = schema)]
     trialResults <- runQuery(query)
-    results <<- rbind(results, cbind(trialData[, 1:4], trialResults))
+    results <<- rbind(results, cbind(trialData[, 1:5], trialResults))
     fwrite(results, file = resultsFile)
   }
 }))
