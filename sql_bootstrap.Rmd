@@ -32,7 +32,7 @@ summary(benchmark)
 ```{r}
 bootstrapTConfidenceIntervals <- function (df, metaReplicates = 1000) {
   b <- boot(df, function (data, indexes) {
-    t(data[indexes, .(mean(elapsed), (.N-1)*var(elapsed)/.N^2)])
+    t(data[indexes, .(mean(elapsed), var(elapsed))])
   }, metaReplicates)
   ci <- if (max(b$t[,1]) - min(b$t[,1]) < 1e-3) {
     # not enough variance for boot.ci
@@ -49,7 +49,7 @@ bootstrapTConfidenceIntervals <- function (df, metaReplicates = 1000) {
 benchmarkCi <- benchmark[
   trial > 1 # first trial is sometimes a 'burn in' on a cold database
   , bootstrapTConfidenceIntervals(.SD),
-  .(exampleId, tool, replicates, kind)]
+  .(exampleId, tool, replicates, kind, type)]
 summary(benchmarkCi)
 ```
 
@@ -61,17 +61,17 @@ summary(benchmarkCiWithExamples)
 ```{r}
 p <- ggplot(
   dcast(
-    benchmarkCiWithExamples[variable == 'elapsed' & conversionRate == 0.01],
-    tool + kind + numHitsOrder ~ point),
+    benchmarkCiWithExamples[variable == 'elapsed' & type == 'percent'],
+    tool + kind + numCatsOrder ~ point),
   aes(
-    x = numHitsOrder, y = avg,
+    x = numCatsOrder, y = avg,
     color = ifelse(kind == 'pure', 'Pure', 'Poisson'))) +
   geom_line(aes(linetype = ifelse(tool == 'bq', 'BigQuery', 'PostgreSQL'))) +
   geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.2) +
   scale_x_continuous(
-    'Number of Hits',
+    'Sample Size (Number of Cats)',
     labels = function (b) parse(text = paste0('10^', b))) +
-  scale_y_continuous('Time (s; lower is better)') +
+  scale_y_continuous('Mean Elapsed Time (s; lower is better)') +
   scale_linetype_discrete(name = 'Tool') +
   scale_color_discrete(name = 'Query Kind') +
   labs(
@@ -95,7 +95,7 @@ summary(checkPg)
 
 ```{r}
 checkPgMelted <- melt(
-    checkPg[, .(exampleId, replicates, kind, trial, lo = measureLo, hi = measureHi)],
+    checkPg[, .(exampleId, replicates, kind, type, trial, lo = measureLo, hi = measureHi)],
     measure.vars = c('lo', 'hi'), variable.name = 'endpoint')
 summary(checkPgMelted)
 ```
