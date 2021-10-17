@@ -10,3 +10,4 @@ example-data
 .Rproj.user
 .Rhistory
 *.nb.html
+*.tar.gz
