@@ -50,7 +50,7 @@ runTrial <- function(trialData) {
   )
 }
 
-invisible(by(grid, 1:nrow(grid), function (trialData) {
+invisible(by(grid, seq_len(nrow(grid)), function (trialData) {
   if (!results[, any(
     exampleId == trialData$exampleId &
     replicates == trialData$replicates)]
