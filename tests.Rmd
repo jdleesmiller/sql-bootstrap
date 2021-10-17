@@ -1,0 +1,115 @@
+
+```{r}
+library(boot)
+library(data.table)
+library(ggplot2)
+```
+
+
+```{r}
+findMeanWithConfidenceIntervals <- function (
+  generateSample, trials, sampleSize, bootstrapReplicates)
+{
+  ciQuantiles <- c(0.025, 0.975)
+  
+  rbindlist(lapply(1:trials, function (trial) {
+    sample <- generateSample(sampleSize)
+    sampleMean <- mean(sample)
+    ciZ <- sampleMean + qnorm(ciQuantiles) * sd(sample) / sqrt(sampleSize)
+    ciT <- sampleMean + qt(ciQuantiles, sampleSize - 1) * sd(sample) / sqrt(sampleSize)
+    bootstrap <- boot(
+      sample,
+      function (data, indexes) mean(data[indexes]),
+      bootstrapReplicates)
+    ciB <- boot.ci(bootstrap, type = c('perc'), index = 1)$percent
+    
+    data.table(
+      trial,
+      method = factor(c('mean', rep(c('Z', 'T', 'B'), each = 2))),
+      kind = factor(c('mean', rep(c('lo', 'hi'), times = 3))),
+      value = c(sampleMean, ciZ, ciT, ciB[4], ciB[5]))
+  }))
+}
+trials <- findMeanWithConfidenceIntervals(rnorm, 1000, 100, 1000)
+head(trials, 100)
+```
+```{r}
+ggplot(trials, aes(value, fill = kind)) +
+  geom_histogram(binwidth = 0.01, position = 'identity', alpha = 0.5) +
+  facet_grid(method ~ .)
+```
+
+```{r}
+checkMeanConfidenceIntervals <- function(trials, trueMean) {
+  d <- dcast(trials, trial ~ method + kind)
+  d[, .(
+    correctB = mean(B_lo <= trueMean & trueMean <= B_hi),
+    correctZ = mean(Z_lo <= trueMean & trueMean <= Z_hi),
+    correctT = mean(T_lo <= trueMean & trueMean <= T_hi))]
+}
+checkMeanConfidenceIntervals(trials, 0)
+```
+
+
+```{r}
+trueRate <- 0.005
+rateTrials <- findMeanWithConfidenceIntervals(
+  function(n) runif(n) < trueRate, 1000, 2000, 1000)
+head(rateTrials, 100)
+```
+
+```{r}
+checkMeanConfidenceIntervals(rateTrials, trueRate)
+```
+```{r}
+checkMeanConfidenceIntervalSign <- function(trials) {
+  d <- dcast(trials, trial ~ method + kind)
+  d[, .(
+    negativeLoB = mean(B_lo < 0),
+    negativeLoZ = mean(Z_lo < 0),
+    negativeLoT = mean(T_lo < 0))]
+}
+checkMeanConfidenceIntervalSign(rateTrials)
+```
+```{r}
+ggplot(rateTrials, aes(value, fill = kind)) +
+  geom_histogram(binwidth = 0.001, position = 'identity', alpha = 0.5) +
+  facet_grid(method ~ .)
+```
+
+```{r}
+dcast(rateTrials, trial ~ method + kind)[trial < 10, .(
+  mean_mean,
+  dB_hi = B_hi - mean_mean, dB_lo = mean_mean - B_lo,
+  dZ_hi = Z_hi - mean_mean, dZ_lo = mean_mean - Z_lo,
+  dT_hi = T_hi - mean_mean, dT_lo = mean_mean - T_lo
+  )]
+```
+
+```{r}
+ggplot(
+  dcast(rateTrials, trial ~ method + kind)[, .(
+    mean_mean = mean_mean,
+    dB_hi = B_hi - mean_mean, dB_lo = mean_mean - B_lo,
+    dZ_hi = Z_hi - mean_mean, dZ_lo = mean_mean - Z_lo,
+    dT_hi = T_hi - mean_mean, dT_lo = mean_mean - T_lo
+    )], aes(mean_mean, dB_hi)) + geom_point()
+```
+
+```{r}
+ggplot(
+  melt(dcast(rateTrials, trial ~ method + kind)[, .(
+    dB_hi = B_hi - mean_mean, dB_lo = mean_mean - B_lo
+    #dT_hi = T_hi - mean_mean, dT_lo = mean_mean - T_lo
+  )], character(0)), aes(value, fill = variable)) +
+  geom_histogram(binwidth = 0.0005, position = 'identity', alpha = 0.5)
+```
+
+```{r}
+local({
+  ns <- 30:1000
+  qApprox <- 1.96 / sqrt(ns)
+  qTrue <- qt(0.975, ns - 1) / sqrt(ns)
+  plot(ns, (qApprox - qTrue) / qTrue)
+})
+```

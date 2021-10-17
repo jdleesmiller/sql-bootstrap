@@ -10,10 +10,10 @@ library(parallel)
 RNGkind("L'Ecuyer-CMRG")
 set.seed(8567442)
 
-trueRate <- c(0.0025, 0.005, 0.01, 0.02)
-sampleSize <- c(1e4, 5e4)
+trueRate <- 2^-(seq(5.7, 8.7, length.out=10))
+sampleSize <- c(1e4)
 bootstrapReplicates <- c(1000, 2000)
-numTrials <- 5000
+numTrials <- 10000
 trials <- CJ(trueRate, sampleSize, trial = 1:numTrials)
 trialKeys <- 1:3
 
@@ -75,6 +75,18 @@ if (file.exists(resultsFile)) {
   save(results, file = resultsFile)
 }
 
-results[method != 'sample',
+misses <- results[method != 'sample',
   .(miss = 1 - mean(ok)),
   .(trueRate, sampleSize, replicates, method, endpoint)]
+# misses
+
+library(ggplot2)
+
+p <- ggplot(
+  misses[sampleSize == 50000 & replicates %in% c(NA, 2000)],
+  aes(x = trueRate, y = miss)) +
+  geom_line(aes(color = method)) +
+  scale_x_log10() +
+  geom_hline(yintercept = 0.025, linetype = 'dashed') +
+  facet_grid(endpoint ~ .)
+print(p)
