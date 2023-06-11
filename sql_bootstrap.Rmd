@@ -10,7 +10,7 @@ library(ggplot2)
 ```
 
 ```{r}
-examples <- fread('example-data/examples.csv', stringsAsFactors = TRUE)
+examples <- fread("example-data/examples.csv", stringsAsFactors = TRUE)
 summary(examples)
 ```
 
@@ -18,146 +18,193 @@ summary(examples)
 
 ```{r}
 benchmark <- rbind(
-  cbind(tool = 'bq', fread('benchmark-bq.csv', stringsAsFactors = TRUE)),
-  cbind(tool = 'pg', fread('benchmark-pg.csv', stringsAsFactors = TRUE))
+  cbind(tool = "bq", fread("benchmark-bq.csv", stringsAsFactors = TRUE)),
+  cbind(tool = "pg", fread("benchmark-pg.csv", stringsAsFactors = TRUE))
 )
 benchmark[, tool := factor(tool)]
 
-# Filter out records that are used for checking (below) rather than benchmarking.
+# Filter out records that are used for checking (below) rather than
+# benchmarking.
 benchmark <- benchmark[trial <= 10 & replicates %in% c(1000)]
 
 summary(benchmark)
 ```
 
 ```{r}
-bootstrapTConfidenceIntervals <- function (df, metaReplicates = 1000) {
-  b <- boot(df, function (data, indexes) {
-    t(data[indexes, .(mean(elapsed), var(elapsed))])
-  }, metaReplicates)
-  ci <- if (max(b$t[,1]) - min(b$t[,1]) < 1e-3) {
+bootstrapConfidenceIntervals <- function(df, metaReplicates = 1000) {
+  b <- boot(
+    df,
+    function(data, indexes) {
+      t(data[indexes, .(mean(elapsed), var(elapsed))])
+    },
+    metaReplicates
+  )
+  ci <- if (max(b$t[, 1]) - min(b$t[, 1]) < 1e-3) {
     # not enough variance for boot.ci
-    c(min(b$t[,1]), max(b$t[,1]))
+    rep(c(min(b$t[, 1]), max(b$t[, 1])), 2)
   } else {
-    boot.ci(b, type = 'stud')$student[4:5]
+    c(
+      boot.ci(b, type = "perc")$percent[4:5],
+      boot.ci(b, type = "stud")$student[4:5]
+    )
   }
   data.table(
-    variable = factor('elapsed'),
-    point = factor(c('lo', 'hi', 'avg')),
+    variable = factor("elapsed"),
+    metaType = factor(c(rep(c("percent", "student"), each = 2), NA)),
+    point = factor(c(rep(c("lo", "hi"), 2), "avg")),
     value = c(ci, b$t0[1])
   )
 }
 benchmarkCi <- benchmark[
-  trial > 1 # first trial is sometimes a 'burn in' on a cold database
-  , bootstrapTConfidenceIntervals(.SD),
-  .(exampleId, tool, replicates, kind, type)]
+  , bootstrapConfidenceIntervals(.SD),
+  .(exampleId, tool, replicates, kind, type)
+]
 summary(benchmarkCi)
 ```
 
 ```{r}
-benchmarkCiWithExamples <- merge(benchmarkCi, examples, by.x = 'exampleId', by.y = 'id')
+benchmarkCiWithExamples <- merge(
+  benchmarkCi, examples,
+  by.x = "exampleId", by.y = "id"
+)
 summary(benchmarkCiWithExamples)
 ```
 
 ```{r}
 p <- ggplot(
   dcast(
-    benchmarkCiWithExamples[variable == 'elapsed' & type == 'percent'],
-    tool + kind + numCatsOrder ~ point),
+    benchmarkCiWithExamples[
+      variable == "elapsed" & type == "percent" & (
+        is.na(metaType) | metaType == "percent")
+    ],
+    tool + kind + numCatsOrder ~ point
+  ),
   aes(
     x = numCatsOrder, y = avg,
-    color = ifelse(kind == 'pure', 'Pure', 'Poisson'))) +
-  geom_line(aes(linetype = ifelse(tool == 'bq', 'BigQuery', 'PostgreSQL'))) +
+    color = ifelse(kind == "pure", "Pure", "Poisson")
+  )
+) +
+  geom_line(aes(linetype = ifelse(tool == "bq", "BigQuery", "PostgreSQL"))) +
   geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.2) +
   scale_x_continuous(
-    'Sample Size (Number of Cats)',
-    labels = function (b) parse(text = paste0('10^', b))) +
-  scale_y_continuous('Mean Elapsed Time (s; lower is better)') +
-  scale_linetype_discrete(name = 'Tool') +
-  scale_color_discrete(name = 'Query Kind') +
+    "Sample Size (Number of Cats)",
+    labels = function(b) parse(text = paste0("10^", b))
+  ) +
+  scale_y_continuous("Mean Elapsed Time (s; lower is better)") +
+  scale_linetype_discrete(name = "Tool") +
+  scale_color_discrete(name = "Query Kind") +
   labs(
-    title = 'SQL Bootstrap Benchmarks',
-    subtitle = 'Elapsed times for 1000 bootstrap resamples')
-ggsave(file = 'benchmark.svg', plot = p, width = 7, height = 4)
+    title = "SQL Bootstrap Benchmarks",
+    subtitle = "Elapsed times for 1000 bootstrap resamples"
+  )
+ggsave(file = "benchmark.svg", plot = p, width = 7, height = 4)
 p
 ```
 
-## Stability of Confidence Intervals
+## Check Confidence Intervals
 
 ```{r}
-check <- fread('check.csv', stringsAsFactors = TRUE)
-summary(check)
+load("check-r.RData")
+checkR <- results[exampleId == 6]
+rm(results)
+checkR[, user := NULL]
+checkR[, system := NULL]
+checkR[, tool := factor("R")]
+summary(checkR)
 ```
 
 ```{r}
-checkPg <- fread('benchmark-pg.csv', stringsAsFactors = TRUE)[exampleId %in% c(3, 4)]
+checkPg <- fread("check-pg.csv", stringsAsFactors = TRUE)
+checkPg[, tool := factor("pg")]
 summary(checkPg)
 ```
 
 ```{r}
-checkPgMelted <- melt(
-    checkPg[, .(exampleId, replicates, kind, type, trial, lo = measureLo, hi = measureHi)],
-    measure.vars = c('lo', 'hi'), variable.name = 'endpoint')
-summary(checkPgMelted)
+checkBq <- fread("check-bq.csv", stringsAsFactors = TRUE)
+checkBq[, tool := factor("bq")]
+summary(checkBq)
 ```
 
 ```{r}
-checkReferenceValues <- local({
-  q <- c(0.025, 0.975)
-  checkExamples <- examples[id %in% checkPg$exampleId]
-  rbind(
-    rbindlist(by(checkExamples, checkExamples[,id], function(example) {
-      xs <- fread(as.character(example[, file]))[, converted]
-      n <- length(xs)
-      sampleMean <- mean(xs)
-      ciT <- sampleMean + qt(q, n - 1) * sd(xs) / sqrt(n)
-      data.table(
-        exampleId = example[, id],
-        ref = factor(c('true', 'sample', 't', 't')),
-        endpoint = factor(c('mean', 'mean', 'lo', 'hi')),
-        value = c(example[, conversionRate], sampleMean, ciT)
-      )
-    })),
-    melt(
-      check[
-        exampleId %in% checkExamples[, id] & replicates == 2000,
-        .(exampleId, ref = 'r', lo = measureLo, hi = measureHi)],
-      id.vars = c('exampleId', 'ref'), variable.name = 'endpoint'))
-})
-checkReferenceValues[
-  , ref := factor(ref, levels = c('true', 'sample', 'r', 't'))]
-summary(checkReferenceValues)
+check <- merge(
+  rbind(checkR, checkPg, checkBq),
+  examples, by.x = "exampleId", by.y = "id")
+summary(check)
 ```
 
 ```{r}
-withExamples <- function (d) {
-  merge(d, examples, by.x = 'exampleId', by.y = 'id')
-}
+checkCompare <- melt(
+  check[
+    replicates == 1000 & type != "bca",
+    .(tool, trial, kind, type, lo = measureLo, hi = measureHi)
+  ],
+  measure.vars = c("lo", "hi"),
+  variable.name = "measure"
+)
+# Repeat the reference values for postgres and bigquery.
+checkCompare <- rbind(
+  checkCompare,
+  checkCompare[type %in% c("t", "z") & trial == 1, .(
+    tool = "pg", trial, kind, type, measure, value
+  )],
+  checkCompare[type %in% c("t", "z") & trial == 1, .(
+    tool = "bq", trial, kind, type, measure, value
+  )])
+levels(checkCompare$tool)[levels(checkCompare$tool) == "pg"] <- "PostgreSQL"
+levels(checkCompare$tool)[levels(checkCompare$tool) == "bq"] <- "BigQuery"
+levels(checkCompare$measure)[levels(checkCompare$measure) == "lo"] <-
+  "Lower 95% CI"
+levels(checkCompare$measure)[levels(checkCompare$measure) == "hi"] <-
+  "Upper 95% CI"
+levels(checkCompare$kind)[levels(checkCompare$kind) == "poisson"] <-
+  "Poisson SQL"
+levels(checkCompare$kind)[levels(checkCompare$kind) == "pure"] <-
+  "Pure SQL"
+head(checkCompare)
+```
+
+```{r}
 referenceValuesLabels <- c(
-  'true' = 'True Mean',
-  'sample' = 'Sample Mean',
-  't' = 'Classical t 95% CI',
-  'r' = 'Bootstrap 95% CI from R')
+  "t" = "Student's t",
+  "z" = "Normal"
+)
 p <- ggplot(
-  withExamples(checkPgMelted)[conversionRate == 0.01],
-  aes(x = value, y = factor(replicates))) +
+  checkCompare[type == "percent"],
+  aes(x = value, y = kind)) +
   geom_violin(
-    aes(group = paste(replicates, endpoint)),
-    position = 'identity') +
+    aes(group = kind),
+    position = "identity") +
   geom_vline(
-    aes(xintercept = value, linetype = ref, color = ref),
-    data = withExamples(checkReferenceValues)[conversionRate == 0.01]) +
-  scale_linetype_discrete('Reference Values', labels = referenceValuesLabels) +
-  scale_color_discrete('Reference Values', labels = referenceValuesLabels) +
-  scale_x_continuous(
-    'Conversion Rate', labels = scales::label_percent(accuracy = 0.1)) +
-  facet_grid(factor(
-    ifelse(kind == 'pure', 'Pure', 'Poisson'),
-    levels = c('Pure', 'Poisson')) ~ .) +
-  ylab('Number of Bootstrap Resamples') +
+    aes(xintercept = value, color = type),
+    data = checkCompare[type %in% c("z", "t") & trial == 1]
+  ) +
+  scale_color_discrete("Reference CIs", labels = referenceValuesLabels) +
+  xlab("Mass (kg)") +
+  ylab("Method") +
   labs(
-    title = 'Checks on SQL Bootstrap Confidence Intervals',
-    subtitle = expression(paste('For', ''~10^4~'', 'hits with 1% true conversion rate'))
+    title = "Checks on SQL Bootstrap Confidence Intervals",
+    subtitle = expression(paste("For 100 cats with 1000 bootstrap resamples"))
+  ) +
+  facet_grid(tool ~ measure, scales = "free", drop = TRUE)
+ggsave(file = "check.svg", plot = p, width = 9, height = 4)
+p
+```
+
+```{r}
+p <- ggplot(checkCompare, aes(value, trial)) +
+  geom_point(
+    aes(color = type, shape = kind),
+    data = checkCompare[type %in% c("percent", "student")]
+  ) +
+  facet_grid(. ~ measure, scales = "free") +
+  geom_vline(
+    aes(xintercept = value, color = type, linetype = kind),
+    data = checkCompare[
+      ,
+      .(value = mean(value)),
+      .(kind, type, measure)
+    ]
   )
-ggsave(file = 'check.svg', plot = p, width = 7, height = 4)
+ggsave(file = "check-all.svg", plot = p, width = 14, height = 8)
 p
 ```

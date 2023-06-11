@@ -10,6 +10,7 @@ PSQL_SCHEMA ?= sql_bootstrap
 BQ_DATASET ?= sql_bootstrap
 
 BENCHMARK_TRIALS ?= 10
+CHECK_TRIALS ?= 100
 
 all: examples
 
@@ -41,7 +42,7 @@ pg-drop:
 	rm -f .flags/pg-*
 
 pg-test: pg-load
-	$(R) make-sql-bootstrap.R 1000 cats_1 poisson student pg $(PSQL_SCHEMA) | $(PSQL)
+	$(R) make-sql-bootstrap.R 1000 cats_2 pure percent pg $(PSQL_SCHEMA) | $(PSQL)
 
 .flags/bq-dataset:
 	$(BQ) mk --force --data_location=$(GCP_REGION) --dataset $(BQ_DATASET)
@@ -71,11 +72,20 @@ benchmark-bq.csv: benchmark.R bq-load
 
 benchmark: benchmark-pg.csv benchmark-bq.csv
 
-# Please don't delete all my results on Ctrl-C...
-.PRECIOUS: benchmark-pg.csv benchmark-bq.csv
+check-pg.csv: benchmark.R pg-load
+	$(R) $< $@ pg $(CHECK_TRIALS) $(PSQL)
 
-check.csv: check.R example-data
+check-bq.csv: benchmark.R bq-load
+	$(R) $< $@ bq $(CHECK_TRIALS) \
+	  $(BQ) --location=$(GCP_REGION) query --use_legacy_sql=false
+
+check-r.RData: check.R example-data
 	$(R) $< $@
+
+check: check-pg.csv check-bq.csv check-r.RData
+
+# Please don't delete all my results on Ctrl-C...
+.PRECIOUS: benchmark-pg.csv benchmark-bq.csv check-pg.csv check-bq.csv check-r.RData
 
 EXAMPLE_DIALECT := pg bq
 EXAMPLE_BOOTSTRAP_KIND := pure poisson
@@ -104,7 +114,7 @@ doc: doc/cats-example.svg
 cloud-sql-instance:
 	@test -n "$(CLOUD_SQL_PGPASSWORD)"
 	gcloud sql instances create $(CLOUD_SQL_INSTANCE) --cpu=4 --memory=16384MB \
-		--database-version=POSTGRES_13 --region=$(GCP_REGION)
+		--database-version=POSTGRES_15 --region=$(GCP_REGION)
 	@gcloud sql users set-password postgres --instance=$(CLOUD_SQL_INSTANCE) \
 		--password="$(CLOUD_SQL_PGPASSWORD)"
 	gcloud sql instances patch $(CLOUD_SQL_INSTANCE) \
@@ -125,7 +135,12 @@ clean: pg-drop bq-drop
 
 test: pg-test bq-test
 
+release: benchmark.svg check.svg doc/cats-example.svg doc/cats-example.png
+	cp $^ ../jdleesmiller.github.io/assets/sql-bootstrap
+
 .PHONY: doc examples example-data clean test
+.PHONY: benchmark check
 .PHONY: sql-load sql-drop sql-test
 .PHONY: bq-load bq-drop bq-test
 .PHONY: cloud-sql-instance cloud-sql-proxy
+.PHONY: release

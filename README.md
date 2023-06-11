@@ -23,7 +23,7 @@ psql
 ```
 make cloud-sql-instance
 make cloud-sql-proxy
-PSQL="psql postgres://postgres:$CLOUD_SQL_PGPASSWORD@localhost:5432" make benchmark-pg.csv
+PSQL="psql postgres://postgres:$CLOUD_SQL_PGPASSWORD@localhost:5432" make pg-test benchmark-pg.csv
 ```
 
 ### BigQuery

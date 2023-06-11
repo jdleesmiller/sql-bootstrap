@@ -3,7 +3,9 @@
 bin/cloud_sql_proxy
 benchmark-*.csv
 benchmark-*.csv.bak.*
-check.csv
+check-r.RData
+check-*.csv
+check-*.csv.bak.*
 doc/*.RData
 doc/*.csv
 example-data
@@ -11,3 +13,6 @@ example-data
 .Rhistory
 *.nb.html
 *.tar.gz
+*.svg
+*.png
+.DS_Store

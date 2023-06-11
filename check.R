@@ -6,58 +6,106 @@ resultsFile <- args[1]
 
 stopifnot(nchar(resultsFile) > 0)
 
-if (!file.exists(resultsFile)) {
-  cat(
-    'exampleId,replicates,measureAvg,measureLo,measureHi,elapsed,user,system\n',
-    file = resultsFile)
+if (file.exists(resultsFile)) {
+  load(resultsFile)
+} else {
+  results <- NULL
 }
-results <- fread(resultsFile)
 
-examples <- fread('example-data/examples.csv')
-examples <- examples[numHitsOrder < 7]
+examples <- fread("example-data/examples.csv")
+examples <- examples[numCatsOrder == 2]
 
 grid <- merge(
   CJ(
     exampleId = examples$id,
-    replicates = c(500, 1000, 2000)
+    replicates = c(1000),
+    trial = 1:100
   ),
-  examples, by.x = 'exampleId', by.y = 'id'
+  examples,
+  by.x = "exampleId", by.y = "id"
 )
 
-runTrial <- function(trialData) {
-  hits <- fread(trialData[, file])
+checkMeanConfidenceIntervals <- function(
+    df,
+    column,
+    trueSd,
+    replicates,
+    useBca = FALSE,
+    ...) {
+  dx <- df[, .(x = get(column))]
 
-  ci <- NA
-  timings <- system.time(local({
-    b <- boot(
-      hits,
-      function (data, indexes) mean(data[indexes, converted]),
-      trialData[, replicates],
-      parallel = 'multicore', ncpus = 3
-    )
-    ci <<- boot.ci(b, type = 'perc', index = 1)
-  }))
+  b <- boot(
+    dx,
+    function(data, indexes) {
+      data[indexes, c(mean(x), var(x))]
+    }, replicates, ...
+  )
 
-  print(ci)
+  bci <- boot.ci(b, type = c("perc", "stud"))
+
+  bca <- c(NA, NA)
+  if (useBca) {
+    bca <- boot.ci(b, type = "bca")$bca[4:5]
+  }
+
+  confidenceLevel <- 0.95
+  q <- (1 + c(-1, 1) * confidenceLevel) / 2
+
+  sampleMean <- mean(dx$x)
+  sampleSd <- sd(dx$x)
+  sampleSize <- nrow(dx)
+
+  ciZ <- sampleMean + qnorm(q) * trueSd / sqrt(sampleSize)
+  ciT <- sampleMean + qt(q, sampleSize - 1) * sampleSd / sqrt(sampleSize)
+  ci196 <- sampleMean + c(-1.96, 1.96) * sampleSd / sqrt(sampleSize)
 
   data.table(
-    measureAvg = mean(hits$converted),
-    measureLo = ci$percent[4],
-    measureHi = ci$percent[5],
-    elapsed = summary(timings)[['elapsed']],
-    user = summary(timings)[['user']],
-    system = summary(timings)[['system']]
+    replicates = replicates,
+    kind = "boot.ci",
+    type = c("percent", "student", "bca", "z", "t", "1pt96"),
+    measureAvg = sampleMean,
+    measureLo = c(
+      bci$percent[4], bci$student[4], bca[1], ciZ[1], ciT[1], ci196[1]
+    ),
+    measureHi = c(
+      bci$percent[5], bci$student[5], bca[2], ciZ[2], ciT[2], ci196[2]
+    )
   )
 }
 
-invisible(by(grid, seq_len(nrow(grid)), function (trialData) {
-  if (!results[, any(
+runTrial <- function(trialData) {
+  cats <- fread(trialData[, file])
+
+  out <- NA
+  timings <- system.time(local({
+    out <<- checkMeanConfidenceIntervals(
+      cats, "mass",
+      trialData[, trueSd],
+      trialData[, replicates],
+      parallel = "multicore", ncpus = 4
+    )
+  }))
+
+  out[, elapsed := summary(timings)[["elapsed"]]]
+  out[, user := summary(timings)[["system"]]]
+  out[, system := summary(timings)[["system"]]]
+
+  out
+}
+
+invisible(by(grid, seq_len(nrow(grid)), function(trialData) {
+  if (is.null(results) || !results[, any(
     exampleId == trialData$exampleId &
-    replicates == trialData$replicates)]
-  ) {
-    print(trialData[, 1:2])
+      replicates == trialData$replicates &
+      trial == trialData$trial
+  )]) {
+    print(trialData[, 1:3])
     trialResults <- runTrial(trialData)
-    results <<- rbind(results, cbind(trialData[, 1:2], trialResults))
-    fwrite(results, file = resultsFile)
+    results <<- rbind(
+      results, cbind(
+        exampleId = trialData$exampleId,
+        trial = trialData$trial,
+        trialResults))
+    save(results, file = resultsFile)
   }
 }))
