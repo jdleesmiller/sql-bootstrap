@@ -1,6 +1,12 @@
 # SQL Bootstrap
 
-## Usage
+Calculate bootstrap confidence intervals in mostly standard SQL, for PostgreSQL and BigQuery.
+
+Companion repo for [this blog post](https://jdlm.info/articles/2023/06/11/bootstrap-confidence-intervals-sql-postgresql-bigquery.html).
+
+## Notes
+
+### Usage
 
 First generate the example data, then run the calculations.
 
@@ -8,8 +14,6 @@ First generate the example data, then run the calculations.
 make example-data
 make
 ```
-
-## Setup Notes
 
 ### Local Postgres
 

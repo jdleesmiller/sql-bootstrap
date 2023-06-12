@@ -131,7 +131,8 @@ cloud-sql-proxy: bin/cloud_sql_proxy
 
 clean: pg-drop bq-drop
 	rm -rf example-data .flags
-	rm -f docs/*.svg
+	rm -f doc/*.svg doc/*.png *.svg *.png *.nb.html
+	rm -f bin/cloud_sql_proxy
 
 test: pg-test bq-test
 
